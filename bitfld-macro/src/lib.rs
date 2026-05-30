@@ -327,9 +327,9 @@ impl Bitfield {
             let range = self.display_range();
 
             let get_doc =
-                format!("The unshifted value of `{type_name}{range}`.",);
+                format!("The unshifted value of `{type_name}{range}`.");
             let set_doc =
-                format!("Sets the unshifted value of `{type_name}{range}`.",);
+                format!("Sets the unshifted value of `{type_name}{range}`.");
 
             if bit_width == 1 {
                 let bit_mask = quote! { (1 << #low_bit) };
@@ -375,9 +375,9 @@ impl Bitfield {
 
         if bit_width == 1 {
             let get_doc =
-                format!("The value of `{type_name}[{}]`.", self.low_bit,);
+                format!("The value of `{type_name}[{}]`.", self.low_bit);
             let set_doc =
-                format!("Sets the value of `{type_name}[{}]`.", self.low_bit,);
+                format!("Sets the value of `{type_name}[{}]`.", self.low_bit);
             return quote! {
                 #cfg_attr
                 #(#doc_attrs)*
