@@ -369,30 +369,4 @@ mod tests {
         assert_eq!(val.unshifted_field(), 0xf000);
         assert_eq!(val.unshifted_bit(), 1 << 8);
     }
-
-    layout!({
-        struct Generic<const N: u32>(u32);
-        {
-            let a: Bits<15, 8>;
-            let b: Bit<0>;
-            let _: Bits<31, 16> = 0xabcd;
-        }
-    });
-
-    #[test]
-    fn const_generics() {
-        let val = *Generic::<0>::new().set_a(0xfe).set_b(true);
-        assert_eq!(val.a(), 0xfe);
-        assert!(val.b());
-        assert_eq!(*val, (0xabcd << 16) | (0xfe << 8) | 1);
-
-        assert_eq!(*Generic::<0>::default(), 0xabcd << 16);
-
-        let fields: Vec<_> = val.into_iter().collect();
-        assert_eq!(fields.len(), 2);
-        assert_eq!(fields[0].0.name, "a");
-        assert_eq!(fields[0].1, 0xfe);
-        assert_eq!(fields[1].0.name, "b");
-        assert_eq!(fields[1].1, 1);
-    }
 }

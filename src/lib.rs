@@ -38,8 +38,6 @@
 //! * Custom bitfield representation types without any boilerplate;
 //! * Iteration over individual bitfield values and metadata;
 //! * Associated constants around masks and shifts for use in inline assembly.
-//! * Parameterization by const generics to account for variations with a common
-//!   layout that one wishes to differentiate within the type system.
 //!
 //! For more detail, see [`layout!`].
 //!
@@ -144,8 +142,6 @@ use core::fmt;
 ///     &nbsp;&nbsp;
 ///         <code>struct</code>
 ///         <a href="https://doc.rust-lang.org/reference/identifiers.html">IDENTIFIER </a>
-///         <em>ConstGenericParams</em>
-///         <sup>?</sup>
 ///         <code>(</code>
 ///             <em>UnsignedBaseType</em>
 ///         <code>)</code>
@@ -237,19 +233,6 @@ use core::fmt;
 ///             <code>u64</code> |
 ///             <code>u128</code> |
 ///             <code>usize</code>
-///     <br>
-///     <br>
-///     <em>ConstGenericParams</em>:
-///     <br>
-///     &nbsp;&nbsp;
-///         <code><</code>
-///         <a href="https://doc.rust-lang.org/reference/items/generics.html#const-generics">ConstGenericParam </a>
-///         (
-///             <code>,</code>
-///             <a href="https://doc.rust-lang.org/reference/items/generics.html#const-generics">ConstGenericParam </a>
-///         )
-///         <sup>*</sup>
-///         <code>></code>
 ///     <br>
 ///     <br>
 /// </blockquote>
@@ -489,33 +472,6 @@ use core::fmt;
 ///
 /// Iterators and iteration are both cheap, with the associated metadata being
 /// defined as a static constant.
-///
-/// ## Const generic parameters
-///
-/// The layout type may have const generic parameters. This parameterization
-/// allows for convenient differentiation in the type system of conceptual
-/// variations of the same layout (e.g., M and S variations of RISC-V CSRs or
-/// EL variations of ARM system registers). Only const generics are supported;
-/// type and lifetime parameters are not.
-///
-/// ```rust
-/// use bitfld::layout;
-///
-/// layout!({
-///     pub struct Reg<const VARIANT: usize>(u32);
-///     {
-///         let field: Bits<7, 0>;
-///     }
-/// });
-///
-/// type Variant0 = Reg<0>;
-/// type Variant1 = Reg<1>;
-///
-/// let a = *Variant0::new().set_field(0xa);
-/// let b = *Variant1::new().set_field(0xb);
-/// assert_eq!(a.field(), 0xa);
-/// assert_eq!(b.field(), 0xb);
-/// ```
 ///
 pub use bitfld_macro::layout;
 
