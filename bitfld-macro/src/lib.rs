@@ -5,7 +5,6 @@
 // https://opensource.org/licenses/MIT#
 
 use std::collections::HashSet;
-use std::str::FromStr;
 
 use proc_macro::TokenStream;
 use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
@@ -206,64 +205,9 @@ struct Bitfield {
 
     //
     default: Option<Box<Expr>>,
-
-    //
-    shifted_mask: TokenStream2,
 }
 
 impl Bitfield {
-    fn new(
-        span: Span,
-        name: Option<Ident>,
-        high_bit: usize,
-        low_bit: usize,
-        repr: Option<Type>,
-        cfg_pointer_width: Option<String>,
-        doc_attrs: Vec<Attribute>,
-        unshifted: bool,
-        default: Option<Box<Expr>>,
-    ) -> Self {
-        let shifted_mask = {
-            let num_ones = high_bit - low_bit + 1;
-            let mut mask_str = "0x".to_string();
-
-            // If the first hex digit is not 'f', write that out now. After that,
-            // the remaining width will be a multiple of four, and the remaining
-            // digits will be either f or 0.
-            if !num_ones.is_multiple_of(4) {
-                mask_str.push(match num_ones % 4 {
-                    1 => '1',
-                    2 => '3',
-                    3 => '7',
-                    _ => unreachable!(),
-                });
-            }
-
-            let mut remaining = num_ones / 4;
-            while remaining > 0 {
-                if mask_str.len() > 2 && remaining.is_multiple_of(4) {
-                    mask_str.push('_');
-                }
-                mask_str.push('f');
-                remaining -= 1;
-            }
-            TokenStream2::from_str(&mask_str).unwrap()
-        };
-
-        Self {
-            span,
-            name,
-            high_bit,
-            low_bit,
-            repr,
-            cfg_pointer_width,
-            doc_attrs,
-            unshifted,
-            default,
-            shifted_mask,
-        }
-    }
-
     const fn is_reserved(&self) -> bool {
         self.name.is_none()
     }
@@ -308,6 +252,9 @@ impl Bitfield {
 
     fn getter_and_setter(&self, ty: &TypeDef) -> TokenStream2 {
         debug_assert!(!self.is_reserved());
+        if self.unshifted {
+            debug_assert!(self.repr.is_none());
+        }
 
         let cfg_attr = cfg_attr(self);
         let doc_attrs = &self.doc_attrs;
@@ -316,147 +263,101 @@ impl Bitfield {
         let type_name = &ty.def.ident;
 
         let base_type = &ty.base.def;
-        let low_bit = Literal::usize_unsuffixed(self.low_bit);
-        let bit_width = self.bit_width();
+        let high_bit = self.high_bit;
+        let low_bit = self.low_bit;
+        let shifted = !self.unshifted;
 
-        if self.unshifted {
-            debug_assert!(self.repr.is_none());
-
-            let shifted_mask = &self.shifted_mask;
-            let mask = quote! { (#shifted_mask << #low_bit) };
+        let (get_doc, set_doc) = {
             let range = self.display_range();
+            let qualifier = if shifted { "" } else { "unshifted " };
+            (
+                format!("The {qualifier}value of `{type_name}{range}`."),
+                format!("Sets the {qualifier}value of `{type_name}{range}`."),
+            )
+        };
 
-            let get_doc =
-                format!("The unshifted value of `{type_name}{range}`.");
-            let set_doc =
-                format!("Sets the unshifted value of `{type_name}{range}`.");
-
-            if bit_width == 1 {
-                let bit_mask = quote! { (1 << #low_bit) };
-                return quote! {
-                    #cfg_attr
-                    #(#doc_attrs)*
-                    #[doc = #get_doc]
-                    #[inline]
-                    pub const fn #name(&self) -> #base_type {
-                        self.0 & #bit_mask
-                    }
-
-                    #cfg_attr
-                    #[doc = #set_doc]
-                    #[inline]
-                    pub const fn #setter_name(&mut self, value: #base_type) -> &mut Self {
-                        debug_assert!((value & !#bit_mask) == 0);
-                        self.0 = (self.0 & !#bit_mask) | (value & #bit_mask);
-                        self
-                    }
-                };
-            }
-
-            return quote! {
-                #cfg_attr
-                #(#doc_attrs)*
-                #[doc = #get_doc]
-                #[inline]
-                pub const fn #name(&self) -> #base_type {
-                    self.0 & #mask
-                }
-
-                #cfg_attr
-                #[doc = #set_doc]
-                #[inline]
-                pub const fn #setter_name(&mut self, value: #base_type) -> &mut Self {
-                    debug_assert!((value & !#mask) == 0);
-                    self.0 = (self.0 & !#mask) | (value & #mask);
-                    self
-                }
-            };
-        }
-
-        if bit_width == 1 {
-            let get_doc =
-                format!("The value of `{type_name}[{}]`.", self.low_bit);
-            let set_doc =
-                format!("Sets the value of `{type_name}[{}]`.", self.low_bit);
+        if self.bit_width() == 1 && shifted {
             return quote! {
                 #cfg_attr
                 #(#doc_attrs)*
                 #[doc = #get_doc]
                 #[inline]
                 pub const fn #name(&self) -> bool {
-                    (self.0 & (1 << #low_bit)) != 0
+                    ::bitfld::get_bit!(self.0, #low_bit)
                 }
 
                 #cfg_attr
+                #(#doc_attrs)*
                 #[doc = #set_doc]
                 #[inline]
                 pub const fn #setter_name(&mut self, value: bool) -> &mut Self {
-                    if value {
-                        self.0 |= (1 << #low_bit);
-                    } else {
-                        self.0 &= !(1 << #low_bit);
-                    }
+                    ::bitfld::set_bit!(self.0, #low_bit, value);
                     self
                 }
             };
         }
 
-        let get_doc = format!(
-            "The value of `{type_name}[{}:{}]`.",
-            self.high_bit, self.low_bit,
-        );
-        let set_doc = format!(
-            "Sets the value of `{type_name}[{}:{}]`.",
-            self.high_bit, self.low_bit,
-        );
+        let clamped_type: TokenStream2 = if shifted {
+            self.minimum_width_integral_type()
+        } else {
+            quote! { #base_type }
+        };
 
-        let min_width = self.minimum_width_integral_type();
-        let shifted_mask = &self.shifted_mask;
-        let get_value =
-            quote! { ((self.0 >> #low_bit) & #shifted_mask) as #min_width };
+        let get_clamped = quote! {
+            ::bitfld::get_field!(
+                #base_type,
+                #clamped_type,
+                #high_bit,
+                #low_bit,
+                #shifted,
+                self.0
+            )
+        };
+
+        let set_clamped = quote! {
+            ::bitfld::set_field!(
+                #base_type,
+                #high_bit,
+                #low_bit,
+                #shifted,
+                self.0,
+                value
+            )
+        };
+
         let getter = if let Some(repr) = &self.repr {
             quote! {
+                #cfg_attr
                 #(#doc_attrs)*
                 #[doc = #get_doc]
                 #[inline]
                 pub fn #name(&self)
-                    -> ::core::result::Result<#repr, ::bitfld::InvalidBits<#min_width>>
+                    -> ::core::result::Result<#repr, ::bitfld::InvalidBits<#clamped_type>>
                 where
                     #repr: ::zerocopy::TryFromBytes,
                 {
                     use ::zerocopy::IntoBytes;
                     use ::zerocopy::TryFromBytes;
-                    let value = #get_value;
+                    let value = #get_clamped ;
                     #repr::try_read_from_bytes(value.as_bytes())
                         .map_err(|_| ::bitfld::InvalidBits(value))
                 }
             }
         } else {
             quote! {
+                #cfg_attr
                 #(#doc_attrs)*
                 #[doc = #get_doc]
                 #[inline]
-                pub const fn #name(&self) -> #min_width {
-                    #get_value
+                pub const fn #name(&self) -> #clamped_type {
+                    #get_clamped
                 }
-            }
-        };
-
-        let set_value = {
-            let value_check = if bit_width >= 8 && bit_width.is_power_of_two() {
-                quote! {}
-            } else {
-                quote! { debug_assert!((value & !#shifted_mask) == 0); }
-            };
-            quote! {
-                #value_check
-                self.0 &= !(#shifted_mask << #low_bit);
-                self.0 |= ((value & #shifted_mask) as #base_type) << #low_bit;
             }
         };
 
         let setter = if let Some(repr) = &self.repr {
             quote! {
+                #cfg_attr
                 #[doc = #set_doc]
                 #[inline]
                 pub fn #setter_name(&mut self, value: #repr) -> &mut Self
@@ -465,18 +366,20 @@ impl Bitfield {
                  {
                     use ::zerocopy::IntoBytes;
                     use ::zerocopy::FromBytes;
-                    const { assert!(::core::mem::size_of::<#repr>() == ::core::mem::size_of::<#min_width>()) }
-                    let value = #min_width::read_from_bytes(value.as_bytes()).unwrap();
-                    #set_value
+                    const { assert!(::core::mem::size_of::<#repr>() == ::core::mem::size_of::<#clamped_type>()) }
+                    let value = #clamped_type::read_from_bytes(value.as_bytes()).unwrap() as #base_type;
+                    #set_clamped ;
                     self
                 }
             }
         } else {
             quote! {
+                #cfg_attr
                 #[doc = #set_doc]
                 #[inline]
-                pub const fn #setter_name(&mut self, value: #min_width) -> &mut Self {
-                    #set_value
+                pub const fn #setter_name(&mut self, value: #clamped_type) -> &mut Self {
+                    let value = value as #base_type;
+                    #set_clamped ;
                     self
                 }
             }
@@ -662,17 +565,17 @@ impl Parse for Bitfield {
             ));
         }
 
-        Ok(Bitfield::new(
-            stmt.span(),
+        Ok(Bitfield {
+            span: stmt.span(),
             name,
-            high,
-            low,
+            high_bit: high,
+            low_bit: low,
             repr,
-            None,
+            cfg_pointer_width: None,
             doc_attrs,
             unshifted,
-            default_or_value,
-        ))
+            default: default_or_value,
+        })
     }
 }
 
@@ -720,8 +623,10 @@ impl Bitfields {
             let cfg_attr = cfg_attr(field);
             let name_lower = field.name.as_ref().unwrap().to_string();
             let name_upper = name_lower.to_uppercase();
+            let high_bit = field.high_bit;
             let low_bit = Literal::usize_unsuffixed(field.low_bit);
-            let shifted_mask = &field.shifted_mask;
+            let shifted_mask =
+                quote! {::bitfld::shifted_mask!(#base, #high_bit, #low_bit) };
 
             let mask_name = format_ident!("{name_upper}_MASK");
             let mask_doc = format!("Unshifted bitmask of `{name_lower}`.");
@@ -792,8 +697,10 @@ impl Bitfields {
         for rsvd in &self.reserved {
             let cfg_attr = cfg_attr(rsvd);
             let rsvd_value = rsvd.default.as_ref().unwrap();
+            let high_bit = rsvd.high_bit;
             let low_bit = Literal::usize_unsuffixed(rsvd.low_bit);
-            let shifted_mask = &rsvd.shifted_mask;
+            let shifted_mask =
+                quote! {::bitfld::shifted_mask!(#base, #high_bit, #low_bit) };
             let name = format_ident!("RSVD_{}_{}", rsvd.high_bit, rsvd.low_bit);
 
             field_constants.push(quote! {

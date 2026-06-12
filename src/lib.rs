@@ -536,6 +536,78 @@ pub use bitfld_macro::layout;
 /// ```
 pub use bitfld_macro::bitfield_repr;
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! get_bit {
+    ($int:expr, $low_bit:literal) => {
+        (($int) & (1 << $low_bit)) != 0
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! set_bit {
+    ($int:expr, $low_bit:literal, $value:ident) => {
+        if $value {
+            $int |= (1 << $low_bit);
+        } else {
+            $int &= !(1 << $low_bit);
+        }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! shifted_mask {
+    ($base:ty, $high_bit:literal, $low_bit:literal) => {{
+        const WIDTH: usize = $high_bit - $low_bit + 1;
+        if (<($base)>::BITS as usize) == WIDTH {
+            <($base)>::MAX
+        } else {
+            (1 << WIDTH) - 1
+        }
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! get_field {
+    ($base:ty, $clamped:ty, $high_bit:literal, $low_bit:literal, $shifted:literal, $int:expr) => {{
+        const SHIFTED_MASK: $base =
+            $crate::shifted_mask!($base, $high_bit, $low_bit);
+        let value = if $shifted {
+            ($int >> $low_bit) & SHIFTED_MASK
+        } else {
+            const UNSHIFTED_MASK: $base = SHIFTED_MASK << $low_bit;
+            $int & UNSHIFTED_MASK
+        };
+        value as $clamped
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! set_field {
+    ($base:ty, $high_bit:literal, $low_bit:literal, $shifted:literal, $int:expr, $value:ident) => {
+        const SHIFTED_MASK: $base =
+            $crate::shifted_mask!($base, $high_bit, $low_bit);
+        const UNSHIFTED_MASK: $base = SHIFTED_MASK << $low_bit;
+
+        $int &= !UNSHIFTED_MASK;
+        if $shifted {
+            // Why??
+            const WIDTH: usize = $high_bit - $low_bit + 1;
+            if WIDTH >= 8 && WIDTH.is_power_of_two() {
+                debug_assert!(($value & !SHIFTED_MASK) == 0);
+            }
+            $int |= ($value & SHIFTED_MASK) << $low_bit;
+        } else {
+            debug_assert!(($value & !UNSHIFTED_MASK) == 0);
+            $int |= $value & UNSHIFTED_MASK;
+        }
+    };
+}
+
 /// Implemented by unsigned integral type, this trait represents a valid base
 /// type for a bitfield layout.
 pub trait Unsigned: fmt::Debug + private::Sealed {}
