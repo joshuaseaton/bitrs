@@ -36,9 +36,7 @@ pub fn bitfield_repr(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn layout(item: TokenStream) -> TokenStream {
-    parse_macro_input!(item as Bitfields)
-        .to_token_stream()
-        .into()
+    parse_macro_input!(item as Layout).to_token_stream().into()
 }
 
 //
@@ -555,14 +553,13 @@ impl Parse for Bitfield {
     }
 }
 
-struct Bitfields {
+struct Layout {
     ty: TypeDef,
     named: Vec<Bitfield>,
     reserved: Vec<Bitfield>,
-    errors: Vec<Error>,
 }
 
-impl Bitfields {
+impl Layout {
     fn constants(&self) -> TokenStream2 {
         let base = &self.ty.base.def;
 
@@ -872,7 +869,24 @@ impl Bitfields {
     }
 }
 
+/// The sequence of bitfield `let` items (no enclosing block). Pure syntactic
+/// content — no validation against any base type, no sort, no named/reserved
+/// split. That all happens at the `Layout` level (or, later, `Multilayout`).
+/// Callers are responsible for peeling whatever braces the surrounding
+/// grammar requires before handing the inner stream to `Bitfields::parse`.
+struct Bitfields(Vec<Bitfield>);
+
 impl Parse for Bitfields {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut fields = Vec::new();
+        while !input.is_empty() {
+            fields.push(input.parse::<Bitfield>()?);
+        }
+        Ok(Self(fields))
+    }
+}
+
+impl Parse for Layout {
     fn parse(input: ParseStream) -> Result<Self> {
         let input = {
             let content;
@@ -882,32 +896,22 @@ impl Parse for Bitfields {
 
         let ty = input.parse::<TypeDef>()?;
 
-        let input = {
+        let inner = {
             let content;
             braced!(content in input);
             content
         };
-
-        let mut fields = Vec::new();
-        let mut errors = Vec::new();
-
-        while !input.is_empty() {
-            fields.push(input.parse::<Bitfield>()?);
-        }
+        let mut fields = inner.parse::<Bitfields>()?.0;
 
         fields.sort_by_key(|field| field.low_bit);
 
-        for i in 0..fields.len() {
-            let curr = &fields[i];
-
-            for next in fields.iter().skip(i + 1) {
-                if curr.high_bit < next.low_bit {
-                    break;
-                }
+        for pair in fields.windows(2) {
+            let (curr, next) = (&pair[0], &pair[1]);
+            if curr.high_bit >= next.low_bit {
                 // TODO(https://github.com/rust-lang/rust/issues/54725): It
-                // would be nice to Span::join() the two spans, but that's still
-                // experimental.
-                errors.push(Error::new(
+                // would be nice to Span::join() the two spans, but that's
+                // still experimental.
+                return Err(Error::new(
                     next.span,
                     format!(
                         "{} ({} {}) overlaps with {} ({} {})",
@@ -926,7 +930,7 @@ impl Parse for Bitfields {
         if let Some(highest) = fields.last()
             && highest.high_bit > highest_possible
         {
-            errors.push(Error::new(
+            return Err(Error::new(
                 highest.span,
                 format!(
                     "high bit {} exceeds the highest possible value \
@@ -936,43 +940,31 @@ impl Parse for Bitfields {
             ));
         }
 
-        let mut bitfld = Self {
+        let mut layout = Self {
             ty,
             named: vec![],
             reserved: vec![],
-            errors,
         };
 
         while let Some(field) = fields.pop() {
             if field.is_reserved() {
                 if field.default.is_some() {
-                    bitfld.reserved.push(field);
+                    layout.reserved.push(field);
                 }
             } else {
-                bitfld.named.push(field);
+                layout.named.push(field);
             }
         }
 
-        Ok(bitfld)
+        Ok(layout)
     }
 }
 
-impl ToTokens for Bitfields {
+impl ToTokens for Layout {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         let type_def = &self.ty.def;
         let type_name = &type_def.ident;
         let base = &self.ty.base.def;
-
-        if !self.errors.is_empty() {
-            let errors = self.errors.iter().map(Error::to_compile_error);
-            quote! {
-                #[derive(Copy, Clone, Eq, PartialEq)]
-                #type_def
-                #(#errors)*
-            }
-            .to_tokens(tokens);
-            return;
-        }
 
         let constants = self.constants();
         let getters_and_setters = self.getters_and_setters();
