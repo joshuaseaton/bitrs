@@ -117,8 +117,6 @@ use core::fmt;
 ///         <code>{</code>
 ///             <em>LayoutType</em>
 ///             <code>{</code>
-///                 <em>TargetPointerWidthCfgBlock</em>
-///                 <sup>*</sup>
 ///                 <em>Bitfield</em>
 ///                 <sup>*</sup>
 ///             <code>}</code>
@@ -146,18 +144,6 @@ use core::fmt;
 ///             <em>UnsignedBaseType</em>
 ///         <code>)</code>
 ///         <code>;</code>
-///     <br>
-///     <br>
-///     <em>TargetPointerWidthCfgBlock</em>:
-///     <br>
-///     &nbsp;&nbsp;
-///         <code>#[cfg(target_pointer_width = </code>
-///         <a href="https://doc.rust-lang.org/reference/tokens.html#string-literals">STRING_LITERAL </a>
-///         <code>)]</code>
-///         <code>{</code>
-///             <em>Bitfield</em>
-///             <sup>*</sup>
-///         <code>}</code>
 ///     <br>
 ///     <br>
 ///     <em>Bitfield</em>:
@@ -231,8 +217,7 @@ use core::fmt;
 ///             <code>u16</code> |
 ///             <code>u32</code> |
 ///             <code>u64</code> |
-///             <code>u128</code> |
-///             <code>usize</code>
+///             <code>u128</code>
 ///     <br>
 ///     <br>
 /// </blockquote>
@@ -421,47 +406,6 @@ use core::fmt;
 /// should be set or unset, as well as `DEFAULT: $base` giving the default
 /// layout value.
 ///
-/// ## `usize` layouts and conditional fields
-///
-/// RISC-V has system registers that nearly identical layouts across the 32-bit
-/// and 64-bit architectures, but for whom upper fields can depend on that bit
-/// width. To ergonomically support these with more uniform syntax, we support
-/// `usize` as a layout base type as well.
-///
-/// Width-dependent fields may be grouped within cfg blocks, each annotated with
-/// a `#[cfg(target_pointer_width = "...")]` attribute. This allows for multiple
-/// mutually exclusive definitions of the same fields (or sequences of them),
-/// and for us to keep field bounds as literals for straightforward overlap
-/// checks at macro-evaluation time. Fields with differing pointer-width
-/// conditions may overlap; all other overlapping fields remain an error.
-/// High-bit bounds checks on the other hand are deferred to compile time.
-///
-/// If a field name appears in multiple cfg blocks and only the first has doc
-/// comments, they are automatically propagated to the others.
-///
-/// Any cfg blocks must appear before any bare (unconditioned) field
-/// declarations, and at most one block per pointer-width value is permitted.
-/// Further, cfg blocks are only permitted in `usize`-based layouts.
-///
-/// For example, a layout modeling RISC-V's `mcause` register:
-/// ```rust
-/// use bitfld::layout;
-///
-/// layout!({
-///     struct Mcause(usize);
-///     {
-///         #[cfg(target_pointer_width = "64")] {
-///             let interrupt: Bit<63>;
-///             let code: Bits<62, 0>;
-///         }
-///         #[cfg(target_pointer_width = "32")] {
-///             let interrupt: Bit<31>;
-///             let code: Bits<30, 0>;
-///         }
-///     }
-/// });
-/// ```
-///
 /// ## Iteration
 ///
 /// The layout type admits iterators over field values and metadata. An iterator
@@ -572,7 +516,6 @@ impl Unsigned for u16 {}
 impl Unsigned for u32 {}
 impl Unsigned for u64 {}
 impl Unsigned for u128 {}
-impl Unsigned for usize {}
 
 // Ensures that no type outside of bitfld can implement this type.
 mod private {
@@ -582,7 +525,6 @@ mod private {
     impl Sealed for u32 {}
     impl Sealed for u64 {}
     impl Sealed for u128 {}
-    impl Sealed for usize {}
 }
 
 /// Represents an invalid bit pattern for a field with a custom representation.

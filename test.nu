@@ -8,9 +8,6 @@
 
 cargo test
 
-# Compilation-time tests for usize layouts.
-cargo check --test usize-comptime-tests --target i686-unknown-linux-gnu
-
 # Make sure examples compile too.
 cargo run --example basic
 cargo run --example bitfield-repr

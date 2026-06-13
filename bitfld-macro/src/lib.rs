@@ -4,18 +4,15 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT#
 
-use std::collections::HashSet;
-
 use proc_macro::TokenStream;
 use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
-use syn::parse::discouraged::Speculative;
 use syn::parse::{Error, Parse, ParseStream, Result};
 use syn::spanned::Spanned;
 use syn::{
     Attribute, Expr, ExprLit, Fields, GenericArgument, Ident, ItemStruct, Lit,
-    MetaNameValue, Pat, Path, PathArguments, Stmt, Type, braced,
-    parse_macro_input, parse_quote,
+    Pat, Path, PathArguments, Stmt, Type, braced, parse_macro_input,
+    parse_quote,
 };
 
 #[proc_macro_attribute]
@@ -54,18 +51,16 @@ enum BaseType {
     U32,
     U64,
     U128,
-    Usize,
 }
 
 impl BaseType {
-    const fn high_bit(&self) -> Option<usize> {
+    const fn high_bit(&self) -> usize {
         match *self {
-            Self::U8 => Some(7),
-            Self::U16 => Some(15),
-            Self::U32 => Some(31),
-            Self::U64 => Some(63),
-            Self::U128 => Some(127),
-            Self::Usize => None,
+            Self::U8 => 7,
+            Self::U16 => 15,
+            Self::U32 => 31,
+            Self::U64 => 63,
+            Self::U128 => 127,
         }
     }
 }
@@ -95,8 +90,6 @@ impl TryFrom<Type> for BaseTypeDef {
             BaseType::U64
         } else if path.is_ident("u128") {
             BaseType::U128
-        } else if path.is_ident("usize") {
-            BaseType::Usize
         } else {
             return Err(Error::new_spanned(path, INVALID_BASE_TYPE));
         };
@@ -199,7 +192,6 @@ struct Bitfield {
     high_bit: usize,
     low_bit: usize,
     repr: Option<Type>,
-    cfg_pointer_width: Option<String>,
     doc_attrs: Vec<Attribute>,
     unshifted: bool,
 
@@ -256,7 +248,6 @@ impl Bitfield {
             debug_assert!(self.repr.is_none());
         }
 
-        let cfg_attr = cfg_attr(self);
         let doc_attrs = &self.doc_attrs;
         let name = self.name.as_ref().unwrap();
         let setter_name = format_ident!("set_{}", name);
@@ -278,7 +269,6 @@ impl Bitfield {
 
         if self.bit_width() == 1 && shifted {
             return quote! {
-                #cfg_attr
                 #(#doc_attrs)*
                 #[doc = #get_doc]
                 #[inline]
@@ -286,7 +276,6 @@ impl Bitfield {
                     ::bitfld::get_bit!(self.0, #low_bit)
                 }
 
-                #cfg_attr
                 #(#doc_attrs)*
                 #[doc = #set_doc]
                 #[inline]
@@ -327,7 +316,6 @@ impl Bitfield {
 
         let getter = if let Some(repr) = &self.repr {
             quote! {
-                #cfg_attr
                 #(#doc_attrs)*
                 #[doc = #get_doc]
                 #[inline]
@@ -345,7 +333,6 @@ impl Bitfield {
             }
         } else {
             quote! {
-                #cfg_attr
                 #(#doc_attrs)*
                 #[doc = #get_doc]
                 #[inline]
@@ -357,7 +344,6 @@ impl Bitfield {
 
         let setter = if let Some(repr) = &self.repr {
             quote! {
-                #cfg_attr
                 #[doc = #set_doc]
                 #[inline]
                 pub fn #setter_name(&mut self, value: #repr) -> &mut Self
@@ -374,7 +360,6 @@ impl Bitfield {
             }
         } else {
             quote! {
-                #cfg_attr
                 #[doc = #set_doc]
                 #[inline]
                 pub const fn #setter_name(&mut self, value: #clamped_type) -> &mut Self {
@@ -386,18 +371,10 @@ impl Bitfield {
         };
 
         quote! {
-            #cfg_attr
             #getter
-            #cfg_attr
             #setter
         }
     }
-}
-
-fn cfg_attr(field: &Bitfield) -> Option<TokenStream2> {
-    field.cfg_pointer_width.as_ref().map(|w| {
-        quote! { #[cfg(target_pointer_width = #w)] }
-    })
 }
 
 impl Parse for Bitfield {
@@ -571,33 +548,10 @@ impl Parse for Bitfield {
             high_bit: high,
             low_bit: low,
             repr,
-            cfg_pointer_width: None,
             doc_attrs,
             unshifted,
             default: default_or_value,
         })
-    }
-}
-
-/// Parses a `#[cfg(target_pointer_width = "...")]` attribute, returning the
-/// width value on success.
-fn parse_target_pointer_width_cfg(attr: &Attribute) -> Result<String> {
-    const ERROR_MSG: &str = "expected #[cfg(target_pointer_width = \"...\")]";
-    let meta = attr
-        .meta
-        .require_list()
-        .map_err(|_| Error::new_spanned(attr, ERROR_MSG))?;
-    let cfg: MetaNameValue = meta
-        .parse_args()
-        .map_err(|_| Error::new_spanned(attr, ERROR_MSG))?;
-    if !cfg.path.is_ident("target_pointer_width") {
-        return Err(Error::new_spanned(attr, ERROR_MSG));
-    }
-    match cfg.value {
-        Expr::Lit(ExprLit {
-            lit: Lit::Str(s), ..
-        }) => Ok(s.value()),
-        _ => Err(Error::new_spanned(attr, ERROR_MSG)),
     }
 }
 
@@ -611,16 +565,13 @@ struct Bitfields {
 impl Bitfields {
     fn constants(&self) -> TokenStream2 {
         let base = &self.ty.base.def;
-        let is_usize = matches!(self.ty.base.ty, BaseType::Usize);
 
         let mut field_constants = Vec::new();
         let mut field_metadata = Vec::new();
-        let mut num_field_stmts = Vec::new();
         let mut checks = Vec::new();
         let mut default_stmts = Vec::new();
 
         for field in &self.named {
-            let cfg_attr = cfg_attr(field);
             let name_lower = field.name.as_ref().unwrap().to_string();
             let name_upper = name_lower.to_uppercase();
             let high_bit = field.high_bit;
@@ -635,10 +586,8 @@ impl Bitfields {
                 format!("Bit shift (i.e., the low bit) of `{name_lower}`.");
 
             field_constants.push(quote! {
-                #cfg_attr
                 #[doc = #mask_doc]
                 pub const #mask_name: #base = (#shifted_mask << #low_bit);
-                #cfg_attr
                 #[doc = #shift_doc]
                 pub const #shift_name: usize = #low_bit;
             });
@@ -649,25 +598,14 @@ impl Bitfields {
                     "Pre-shifted default value of the `{name_lower}` field.",
                 );
                 field_constants.push(quote! {
-                    #cfg_attr
                     #[doc = #doc]
                     pub const #default_name: #base = ((#default) as #base) << #low_bit;
                 });
                 checks.push(quote! {
-                    #cfg_attr
                     const { assert!(((#default) as #base) << #low_bit & !(#shifted_mask << #low_bit) == 0) }
                 });
                 default_stmts.push(quote! {
-                    #cfg_attr
                     { v |= Self::#default_name; }
-                });
-            }
-
-            if is_usize {
-                let high_bit = Literal::usize_unsuffixed(field.high_bit);
-                checks.push(quote! {
-                    #cfg_attr
-                    const { assert!(#high_bit < usize::BITS as usize) }
                 });
             }
 
@@ -678,7 +616,6 @@ impl Bitfields {
                 quote! { 0 }
             };
             field_metadata.push(quote! {
-                #cfg_attr
                 ::bitfld::FieldMetadata::<#base>{
                     name: #name_lower,
                     high_bit: #high_bit,
@@ -686,16 +623,13 @@ impl Bitfields {
                     default: #default as #base,
                 },
             });
-            num_field_stmts.push(quote! {
-                #cfg_attr
-                { n += 1; }
-            });
         }
+
+        let num_fields = self.named.len();
 
         let mut rsvd1_stmts = Vec::new();
         let mut rsvd0_stmts = Vec::new();
         for rsvd in &self.reserved {
-            let cfg_attr = cfg_attr(rsvd);
             let rsvd_value = rsvd.default.as_ref().unwrap();
             let high_bit = rsvd.high_bit;
             let low_bit = Literal::usize_unsuffixed(rsvd.low_bit);
@@ -704,43 +638,23 @@ impl Bitfields {
             let name = format_ident!("RSVD_{}_{}", rsvd.high_bit, rsvd.low_bit);
 
             field_constants.push(quote! {
-                #cfg_attr
                 const #name: #base = (#rsvd_value as #base) << #low_bit;
             });
             checks.push(quote! {
-                #cfg_attr
                 const { assert!((#rsvd_value as #base) << #low_bit & !(#shifted_mask << #low_bit) == 0) }
             });
             rsvd1_stmts.push(quote! {
-                #cfg_attr
                 { v |= Self::#name; }
             });
             rsvd0_stmts.push(quote! {
-                #cfg_attr
                 { v |= !Self::#name & (#shifted_mask << #low_bit); }
             });
-
-            if is_usize {
-                let high_bit = Literal::usize_unsuffixed(rsvd.high_bit);
-                checks.push(quote! {
-                    #cfg_attr
-                    const { assert!(#high_bit < usize::BITS as usize) }
-                });
-            }
         }
-
-        let num_fields_expr = quote! {
-            {
-                let mut n = 0usize;
-                #(#num_field_stmts)*
-                n
-            }
-        };
         field_constants.push(quote! {
             #[doc(hidden)]
-            const NUM_FIELDS: usize = #num_fields_expr;
+            const NUM_FIELDS: usize = #num_fields;
             /// Metadata of all named fields in the layout.
-            pub const FIELDS: [::bitfld::FieldMetadata::<#base>; #num_fields_expr] = [
+            pub const FIELDS: [::bitfld::FieldMetadata::<#base>; #num_fields] = [
                 #(#field_metadata)*
             ];
         });
@@ -876,7 +790,6 @@ impl Bitfields {
         };
 
         let fmt_fields = self.named.iter().map(|field| {
-            let cfg_attr = cfg_attr(field);
             let name = &field.name;
             let name_str = name.as_ref().unwrap().to_string();
             let default_specifier = if field.bit_width() == 1 {
@@ -893,7 +806,6 @@ impl Bitfields {
                 );
                 let err_format_string = Literal::string(&err_format_string);
                 quote! {
-                    #cfg_attr
                     {
                         match self.#name() {
                             Ok(value) => write!(f, #ok_format_string, value),
@@ -907,7 +819,6 @@ impl Bitfields {
                 );
                 let format_string = Literal::string(&format_string);
                 quote! {
-                    #cfg_attr
                     { write!(f, #format_string, self.#name())?; }
                 }
             }
@@ -979,93 +890,9 @@ impl Parse for Bitfields {
 
         let mut fields = Vec::new();
         let mut errors = Vec::new();
-        let is_usize = matches!(ty.base.ty, BaseType::Usize);
 
-        // Phase 1: parse cfg blocks. Each is `#[cfg(...)] { fields }`.
-        // We use a fork to distinguish a cfg block from a bare field with
-        // a stray attribute (which the field parser will reject).
-        let mut seen_widths = HashSet::new();
-        while input.peek(syn::Token![#]) {
-            let fork = input.fork();
-            let attrs = fork.call(Attribute::parse_outer)?;
-            if !fork.peek(syn::token::Brace) {
-                break;
-            }
-            input.advance_to(&fork);
-
-            let attr = &attrs[0];
-            if attrs.len() > 1 {
-                return Err(Error::new_spanned(
-                    &attrs[1],
-                    "expected `{` after cfg attribute",
-                ));
-            }
-            let width = parse_target_pointer_width_cfg(attr)?;
-
-            if !is_usize {
-                errors.push(Error::new_spanned(
-                    attr,
-                    "#[cfg] blocks are only permitted in `usize`-based layouts",
-                ));
-            }
-            if seen_widths.contains(width.as_str()) {
-                errors.push(Error::new_spanned(
-                    attr,
-                    format!(
-                        "duplicate cfg block for target_pointer_width = \"{width}\""
-                    ),
-                ));
-            }
-
-            let block;
-            braced!(block in input);
-            if block.is_empty() {
-                errors.push(Error::new_spanned(
-                    attr,
-                    "cfg block must contain at least one field",
-                ));
-            }
-            while !block.is_empty() {
-                let mut field = block.parse::<Bitfield>()?;
-                field.cfg_pointer_width = Some(width.clone());
-                fields.push(field);
-            }
-            seen_widths.insert(width);
-        }
-
-        // Phase 2: bare fields.
         while !input.is_empty() {
             fields.push(input.parse::<Bitfield>()?);
-        }
-
-        // Propagate doc comments and `unshifted` across cfg-gated field
-        // variants: if one variant has them and the other doesn't, copy over.
-        for i in 0..fields.len() {
-            if fields[i].name.is_none()
-                || fields[i].cfg_pointer_width.is_none()
-                || (fields[i].doc_attrs.is_empty() && !fields[i].unshifted)
-            {
-                continue;
-            }
-            for j in (i + 1)..fields.len() {
-                if fields[j].name == fields[i].name
-                    && fields[j].cfg_pointer_width.is_some()
-                    && fields[j].cfg_pointer_width
-                        != fields[i].cfg_pointer_width
-                {
-                    if !fields[i].doc_attrs.is_empty()
-                        && fields[j].doc_attrs.is_empty()
-                    {
-                        #[allow(clippy::assigning_clones)]
-                        {
-                            fields[j].doc_attrs = fields[i].doc_attrs.clone();
-                        }
-                    }
-                    if fields[i].unshifted {
-                        fields[j].unshifted = true;
-                    }
-                }
-            }
         }
 
         fields.sort_by_key(|field| field.low_bit);
@@ -1073,38 +900,30 @@ impl Parse for Bitfields {
         for i in 0..fields.len() {
             let curr = &fields[i];
 
-            // The might be multiple overlapping fields, and some might be valid
-            // if mutually excluded due to differing target pointer cfg
-            // conditions.
             for next in fields.iter().skip(i + 1) {
                 if curr.high_bit < next.low_bit {
                     break;
                 }
-                let can_overlap = curr.cfg_pointer_width.is_some()
-                    && next.cfg_pointer_width.is_some()
-                    && curr.cfg_pointer_width != next.cfg_pointer_width;
-                if !can_overlap {
-                    // TODO(https://github.com/rust-lang/rust/issues/54725): It
-                    // would be nice to Span::join() the two spans, but that's still
-                    // experimental.
-                    errors.push(Error::new(
-                        next.span,
-                        format!(
-                            "{} ({} {}) overlaps with {} ({} {})",
-                            next.display_name(),
-                            next.display_kind(),
-                            next.display_range(),
-                            curr.display_name(),
-                            curr.display_kind(),
-                            curr.display_range(),
-                        ),
-                    ));
-                }
+                // TODO(https://github.com/rust-lang/rust/issues/54725): It
+                // would be nice to Span::join() the two spans, but that's still
+                // experimental.
+                errors.push(Error::new(
+                    next.span,
+                    format!(
+                        "{} ({} {}) overlaps with {} ({} {})",
+                        next.display_name(),
+                        next.display_kind(),
+                        next.display_range(),
+                        curr.display_name(),
+                        curr.display_kind(),
+                        curr.display_range(),
+                    ),
+                ));
             }
         }
 
-        if let Some(highest_possible) = ty.base.ty.high_bit()
-            && let Some(highest) = fields.last()
+        let highest_possible = ty.base.ty.high_bit();
+        if let Some(highest) = fields.last()
             && highest.high_bit > highest_possible
         {
             errors.push(Error::new(
