@@ -11,3 +11,4 @@ cargo test
 # Make sure examples compile too.
 cargo run --example basic
 cargo run --example bitfield-repr
+cargo run --example multilayout

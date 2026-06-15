@@ -6,7 +6,7 @@
 
 #[cfg(test)]
 mod tests {
-    use bitfld::{FieldMetadata, bitfield_repr, layout};
+    use bitfld::{FieldMetadata, bitfield_repr, layout, multilayout};
 
     layout!({
         struct EmptyU8(u8);
@@ -100,13 +100,13 @@ mod tests {
                 | (0b11 << 9)
         );
 
-        assert_eq!(Example::U32_REPR_MASK, 0x1ffff8000000);
+        assert_eq!(Example::U32_REPR_MASK, 0x1fff_f800_0000);
         assert_eq!(Example::U32_REPR_SHIFT, 27usize,);
 
-        assert_eq!(Example::CUSTOM_MASK, 0x7800000);
+        assert_eq!(Example::CUSTOM_MASK, 0x780_0000);
         assert_eq!(Example::CUSTOM_SHIFT, 23usize);
 
-        assert_eq!(Example::CUSTOM_WITH_DEFAULT_MASK, 0x780000);
+        assert_eq!(Example::CUSTOM_WITH_DEFAULT_MASK, 0x78_0000);
         assert_eq!(Example::CUSTOM_WITH_DEFAULT_SHIFT, 19usize);
 
         assert_eq!(Example::RSVD_18_11, 0xef << 11);
@@ -137,10 +137,7 @@ mod tests {
 
     #[test]
     fn from() {
-        assert_eq!(
-            *Example::from(0 | Example::RSVD1_MASK),
-            0 | Example::RSVD1_MASK
-        );
+        assert_eq!(*Example::from(Example::RSVD1_MASK), Example::RSVD1_MASK);
         assert_eq!(
             *Example::from(1 | Example::RSVD1_MASK),
             1 | Example::RSVD1_MASK
@@ -204,14 +201,6 @@ mod tests {
     fn iter() {
         type Metadata = FieldMetadata<u64>;
 
-        let example = *Example::new()
-            .set_u32_repr(0xabcd)
-            .set_custom(CustomFieldRepr::Option1)
-            .set_custom_with_default(CustomFieldRepr::Option2)
-            .set_with_default(0b10)
-            .set_bit(true)
-            .set_u8_repr(0xc);
-
         const EXPECTED: [(u64, Metadata); 6] = [
             (
                 0xabcd,
@@ -268,6 +257,14 @@ mod tests {
                 },
             ),
         ];
+
+        let example = *Example::new()
+            .set_u32_repr(0xabcd)
+            .set_custom(CustomFieldRepr::Option1)
+            .set_custom_with_default(CustomFieldRepr::Option2)
+            .set_with_default(0b10)
+            .set_bit(true)
+            .set_u8_repr(0xc);
 
         let actual: Vec<(&'static Metadata, u64)> =
             example.into_iter().collect();
@@ -368,5 +365,109 @@ mod tests {
         let val = Unshifted::from(0xffff_ffff);
         assert_eq!(val.unshifted_field(), 0xf000);
         assert_eq!(val.unshifted_bit(), 1 << 8);
+    }
+
+    multilayout!({
+        pub struct Mstatus32(u32);
+        pub struct Mstatus64(u64);
+        pub struct Sstatus32(u32);
+        pub struct Sstatus64(u64);
+
+        #[variant(Mstatus32, Sstatus32)]
+        {
+            let sd @ 31;
+        }
+        #[variant(Mstatus64, Sstatus64)]
+        {
+            let sd @ 63;
+        }
+        #[variant(Mstatus64)]
+        {
+            let mbe @ 37;
+            let sbe @ 36;
+            let sxl @ 35..34;
+        }
+        #[variant(Mstatus64, Sstatus64)]
+        {
+            let uxl @ 33..32;
+        }
+        #[variant(Mstatus32, Mstatus64)]
+        {
+            let tsr @ 22;
+            let tw @ 21;
+            let tvm @ 20;
+            let mprv @ 17;
+            let mpp @ 12..11;
+            let mpie @ 7;
+            let mie @ 3;
+        }
+        {
+            let mxr @ 19;
+            let sum @ 18;
+            let xs @ 16..15;
+            let fs @ 14..13;
+            let vs @ 10..9;
+            let spp @ 8;
+            let ube @ 6;
+            let spie @ 5;
+            let sie @ 1;
+        }
+    });
+
+    #[test]
+    fn sd_at_xlen_minus_1() {
+        // SD is at bit 31 on RV32 and bit 63 on RV64 — same name in every
+        // *status variant, position keyed on base width.
+        let m32 = *Mstatus32::new().set_sd(true);
+        let m64 = *Mstatus64::new().set_sd(true);
+        let s32 = *Sstatus32::new().set_sd(true);
+        let s64 = *Sstatus64::new().set_sd(true);
+        assert_eq!(*m32 & Mstatus32::SD_MASK, 1u32 << 31);
+        assert_eq!(*m64 & Mstatus64::SD_MASK, 1u64 << 63);
+        assert_eq!(*s32 & Sstatus32::SD_MASK, 1u32 << 31);
+        assert_eq!(*s64 & Sstatus64::SD_MASK, 1u64 << 63);
+    }
+
+    #[test]
+    fn mstatus_round_trip() {
+        // Behavioral check on shared low-half fields plus M-mode-only ones:
+        // set, then read back.
+        let m = *Mstatus64::new()
+            .set_tsr(true)
+            .set_mpp(0b11)
+            .set_mxr(true)
+            .set_mie(true);
+        assert!(m.tsr());
+        assert_eq!(m.mpp(), 0b11);
+        assert!(m.mxr());
+        assert!(m.mie());
+    }
+
+    #[test]
+    fn uxl_visible_in_both_modes() {
+        // UXL appears in mstatus64 and sstatus64 at the same position. SXL
+        // is M-mode-only — Sstatus64 doesn't have a set_sxl method.
+        let m = *Mstatus64::new().set_uxl(0b10);
+        let s = *Sstatus64::new().set_uxl(0b10);
+        assert_eq!(m.uxl(), 0b10);
+        assert_eq!(s.uxl(), 0b10);
+    }
+
+    #[test]
+    fn sstatus_shared_low_half_round_trip() {
+        // The shared low half (MXR/SUM/SPP/UBE/SPIE/SIE etc.) must work in
+        // the supervisor variants too — set and read back on both.
+        let s32 = *Sstatus32::new()
+            .set_mxr(true)
+            .set_sum(true)
+            .set_spp(true)
+            .set_sie(true);
+        let s64 = *Sstatus64::new()
+            .set_mxr(true)
+            .set_sum(true)
+            .set_spp(true)
+            .set_sie(true);
+        assert!(s32.mxr() && s32.sum() && s32.spp() && s32.sie());
+        assert!(s64.mxr() && s64.sum() && s64.spp() && s64.sie());
     }
 }

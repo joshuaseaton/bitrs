@@ -437,6 +437,168 @@ pub use bitfld_macro::layout;
 /// ```
 pub use bitfld_macro::bitfield_repr;
 
+/// Specifies a family of closely related bitfield layouts in one place,
+/// expanding to one [`layout!`]-equivalent type per declared variant.
+///
+/// `multilayout!` is a strict layering over [`layout!`]: it parses a head of
+/// variant declarations followed by a sequence of *field contribution blocks*,
+/// fans the fields out per variant, and emits the same code that hand-written
+/// `layout!` invocations would. There is no shared trait, no const-generic
+/// parameterization, and no runtime relationship between the emitted variant
+/// types.
+///
+/// Each field contribution block is either bare (`{ ... }` — applies to every
+/// declared variant) or variant-tagged (`#[variant(V, ...)] { ... }` — applies
+/// only to the listed variants). Block order is irrelevant; each
+/// contribution's fields union into the matching per-variant field lists.
+/// Each field name may appear at most once per variant; declaring the same
+/// name in two contributions that both apply to a variant is rejected as an
+/// overlap inside that variant.
+///
+/// # Syntax
+///
+/// <blockquote>
+///     <em>Multilayout</em>:
+///     <br>
+///     &nbsp;&nbsp;
+///         <code>{</code>
+///             <em>VariantHead</em>
+///             <sup>+</sup>
+///             <em>ContributionBlock</em>
+///             <sup>+</sup>
+///         <code>}</code>
+///     <br>
+///     <br>
+///     <em>VariantHead</em>:
+///         &nbsp;same as
+///         <em><a href="macro.layout.html"><code>layout!</code>'s LayoutType</a></em>
+///     <br>
+///     <br>
+///     <em>ContributionBlock</em>:
+///     <br>
+///     &nbsp;&nbsp;
+///         (
+///             <code>#[variant(</code>
+///             <em>VariantList</em>
+///             <code>)]</code>
+///         )
+///         <sup>?</sup>
+///         <code>{</code>
+///             <em>Bitfield</em>
+///             <sup>*</sup>
+///         <code>}</code>
+///     <br>
+///     <br>
+///     <em>VariantList</em>:
+///     <br>
+///     &nbsp;&nbsp;
+///         <a href="https://doc.rust-lang.org/reference/identifiers.html">IDENTIFIER </a>
+///         (
+///             <code>,</code>
+///             <a href="https://doc.rust-lang.org/reference/identifiers.html">IDENTIFIER </a>
+///         )
+///         <sup>*</sup>
+///     <br>
+///     <br>
+///     <em>Bitfield</em>:
+///         &nbsp;same as
+///         <em><a href="macro.layout.html"><code>layout!</code>'s Bitfield</a></em>
+///     <br>
+///     <br>
+/// </blockquote>
+///
+/// Each <em>`VariantList`</em> identifier must name a struct declared in one
+/// of the preceding <em>`VariantHead`</em>s. The contribution-block sequence
+/// must be non-empty.
+///
+/// # Example
+///
+/// The RISC-V status-register family — `mstatus` and `sstatus` in both RV32
+/// and RV64 forms. Contribution blocks are grouped by the set of variants
+/// their fields apply to.
+///
+/// ```rust
+/// use bitfld::multilayout;
+///
+/// multilayout!({
+///     pub struct Mstatus32(u32);
+///     pub struct Mstatus64(u64);
+///     pub struct Sstatus32(u32);
+///     pub struct Sstatus64(u64);
+///
+///     // SD sits at XLEN-1 in every *status form.
+///     #[variant(Mstatus32, Sstatus32)]
+///     {
+///         let sd @ 31;
+///     }
+///     #[variant(Mstatus64, Sstatus64)]
+///     {
+///         let sd @ 63;
+///     }
+///
+///     // RV64 high-half. MBE/SBE/SXL are M-mode only.
+///     #[variant(Mstatus64)]
+///     {
+///         let mbe @ 37;
+///         let sbe @ 36;
+///         let sxl @ 35..34;
+///     }
+///     // UXL is visible from both M and S modes on RV64.
+///     #[variant(Mstatus64, Sstatus64)]
+///     {
+///         let uxl @ 33..32;
+///     }
+///
+///     // M-mode-only low-half fields (WPRI from supervisor's view).
+///     #[variant(Mstatus32, Mstatus64)]
+///     {
+///         let tsr  @ 22;
+///         let tw   @ 21;
+///         let tvm  @ 20;
+///         let mprv @ 17;
+///         let mpp  @ 12..11;
+///         let mpie @ 7;
+///         let mie  @ 3;
+///     }
+///
+///     // Shared low-half fields.
+///     {
+///         let mxr  @ 19;
+///         let sum  @ 18;
+///         let xs   @ 16..15;
+///         let fs   @ 14..13;
+///         let vs   @ 10..9;
+///         let spp  @ 8;
+///         let ube  @ 6;
+///         let spie @ 5;
+///         let sie  @ 1;
+///     }
+/// });
+///
+/// // SD lives at XLEN-1 in every *status variant.
+/// let m32 = *Mstatus32::new().set_sd(true);
+/// let m64 = *Mstatus64::new().set_sd(true);
+/// let s32 = *Sstatus32::new().set_sd(true);
+/// let s64 = *Sstatus64::new().set_sd(true);
+/// assert_eq!(*m32 & Mstatus32::SD_MASK, 1u32 << 31);
+/// assert_eq!(*m64 & Mstatus64::SD_MASK, 1u64 << 63);
+/// assert_eq!(*s32 & Sstatus32::SD_MASK, 1u32 << 31);
+/// assert_eq!(*s64 & Sstatus64::SD_MASK, 1u64 << 63);
+///
+/// // M-mode-only fields only exist in mstatus.
+/// let m = *Mstatus64::new().set_tsr(true).set_mpp(0b11).set_mie(true);
+/// assert!(m.tsr());
+/// assert_eq!(m.mpp(), 0b11);
+/// assert!(m.mie());
+///
+/// // UXL is visible from both M and S modes; SXL is M-mode only.
+/// let m = *Mstatus64::new().set_uxl(0b10);
+/// let s = *Sstatus64::new().set_uxl(0b10);
+/// assert_eq!(m.uxl(), 0b10);
+/// assert_eq!(s.uxl(), 0b10);
+/// ```
+pub use bitfld_macro::multilayout;
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! get_bit {

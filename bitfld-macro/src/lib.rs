@@ -4,15 +4,18 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT#
 
+use std::collections::HashSet;
+
 use proc_macro::TokenStream;
 use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::parse::{Error, Parse, ParseStream, Result};
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
     Attribute, Expr, ExprLit, ExprRange, Fields, Ident, ItemStruct, Lit, Pat,
     PatIdent, RangeLimits, Stmt, Token, Type, braced, parse_macro_input,
-    parse_quote,
+    parse_quote, token,
 };
 
 #[proc_macro_attribute]
@@ -37,6 +40,13 @@ pub fn bitfield_repr(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn layout(item: TokenStream) -> TokenStream {
     parse_macro_input!(item as Layout).to_token_stream().into()
+}
+
+#[proc_macro]
+pub fn multilayout(item: TokenStream) -> TokenStream {
+    parse_macro_input!(item as Multilayout)
+        .to_token_stream()
+        .into()
 }
 
 //
@@ -184,6 +194,10 @@ impl Parse for TypeDef {
 // Parsing and binding for an individual bitfield.
 //
 
+// `Clone` is required because `Multilayout::parse` fans each parsed field out
+// into every variant whose field contribution block names it — a field tagged
+// `#[variant(A, B)]` ends up cloned once for `A` and once for `B`.
+#[derive(Clone)]
 struct Bitfield {
     span: Span,
     name: Option<Ident>,
@@ -911,9 +925,9 @@ impl Layout {
 
 /// The sequence of bitfield `let` items (no enclosing block). Pure syntactic
 /// content — no validation against any base type, no sort, no named/reserved
-/// split. That all happens at the `Layout` level (or, later, `Multilayout`).
-/// Callers are responsible for peeling whatever braces the surrounding
-/// grammar requires before handing the inner stream to `Bitfields::parse`.
+/// split. Validation happens at the `Layout` or `Multilayout` level. Callers
+/// are responsible for peeling whatever braces the surrounding grammar
+/// requires before handing the inner stream to `Bitfields::parse`.
 struct Bitfields(Vec<Bitfield>);
 
 impl Parse for Bitfields {
@@ -926,23 +940,12 @@ impl Parse for Bitfields {
     }
 }
 
-impl Parse for Layout {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let input = {
-            let content;
-            braced!(content in input);
-            content
-        };
-
-        let ty = input.parse::<TypeDef>()?;
-
-        let inner = {
-            let content;
-            braced!(content in input);
-            content
-        };
-        let mut fields = inner.parse::<Bitfields>()?.0;
-
+impl Layout {
+    /// Builds a `Layout` from a pre-parsed type and a flat field list. Runs
+    /// the within-layout invariants (sort, overlap check, high-bit bound),
+    /// returning the first violation as an error, then splits fields into
+    /// named/reserved. Shared by `Parse for Layout` and `Multilayout::parse`.
+    fn from_parts(ty: TypeDef, mut fields: Vec<Bitfield>) -> Result<Self> {
         fields.sort_by_key(|field| field.low_bit);
 
         for pair in fields.windows(2) {
@@ -980,13 +983,16 @@ impl Parse for Layout {
             ));
         }
 
+        // Drain in reverse so `named` and `reserved` end up in descending
+        // bit order (high bit first). The codegen doesn't depend on a
+        // specific order, but the metadata does, which is downstream of this
+        // ordering.
         let mut layout = Self {
             ty,
             named: vec![],
             reserved: vec![],
         };
-
-        while let Some(field) = fields.pop() {
+        for field in fields.into_iter().rev() {
             if field.is_reserved() {
                 if field.default.is_some() {
                     layout.reserved.push(field);
@@ -995,8 +1001,27 @@ impl Parse for Layout {
                 layout.named.push(field);
             }
         }
-
         Ok(layout)
+    }
+}
+
+impl Parse for Layout {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let input = {
+            let content;
+            braced!(content in input);
+            content
+        };
+
+        let ty = input.parse::<TypeDef>()?;
+
+        let inner = {
+            let content;
+            braced!(content in input);
+            content
+        };
+        let fields = inner.parse::<Bitfields>()?.0;
+        Self::from_parts(ty, fields)
     }
 }
 
@@ -1073,5 +1098,158 @@ impl ToTokens for Layout {
             #fmt_impls
         }
         .to_tokens(tokens);
+    }
+}
+
+//
+// `multilayout!`: a family of layouts in one place. Parses one or more
+// `pub struct V(base);` variant heads followed by a sequence of contribution
+// blocks. Each block is either bare (`{ ... }` — applies to every variant)
+// or variant-tagged (`#[variant(V, ...)] { ... }` — applies only to the
+// listed variants). Block order is irrelevant; each contribution's fields
+// union into the matching per-variant field lists. Emits one
+// `Layout`-equivalent stream per declared variant.
+//
+
+struct Multilayout {
+    layouts: Vec<Layout>,
+}
+
+/// Returns `true` if the next item in `input` is a field contribution block — a
+/// bare `{ ... }` or one starting with a `#[variant(...)]` outer attribute.
+/// Pure lookahead: parses the next attribute on a fork to inspect its path,
+/// without advancing `input`. Used to draw the boundary between the
+/// variant-head section and the contribution section without having
+/// `TypeDef::parse` choke on a leading `#[variant(...)]`. If the fork's
+/// attribute parse fails (malformed attribute), we report "not a
+/// contribution" and let the main parser surface the syntax error through
+/// `TypeDef::parse`, which re-parses the same attribute.
+fn looks_like_contribution(input: ParseStream) -> bool {
+    if input.peek(token::Brace) {
+        return true;
+    }
+    if !input.peek(Token![#]) {
+        return false;
+    }
+    let fork = input.fork();
+    match fork.call(Attribute::parse_outer) {
+        Ok(attrs) => attrs.iter().any(|a| a.path().is_ident("variant")),
+        Err(_) => false,
+    }
+}
+
+impl Parse for Multilayout {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let input = {
+            let content;
+            braced!(content in input);
+            content
+        };
+
+        // Phase 1: variant heads.
+        let mut types: Vec<TypeDef> = Vec::new();
+        while !looks_like_contribution(&input) {
+            if input.is_empty() {
+                return Err(Error::new(
+                    input.span(),
+                    "expected at least one field contribution block after the variant declarations",
+                ));
+            }
+            types.push(input.parse::<TypeDef>()?);
+        }
+        if types.is_empty() {
+            return Err(Error::new(
+                input.span(),
+                "expected at least one `struct Variant(base);` declaration",
+            ));
+        }
+
+        let known_variants: HashSet<String> =
+            types.iter().map(|t| t.def.ident.to_string()).collect();
+
+        // Phase 2: field contribution blocks. Mirrors `layout!`'s requirement
+        // of an explicit body block — at least one contribution must be
+        // present, even if empty (e.g., a bare `{}` declares N empty layouts).
+        if input.is_empty() {
+            return Err(Error::new(
+                input.span(),
+                "expected at least one fieldcontribution block",
+            ));
+        }
+        let mut tagged: Vec<(Bitfield, Option<Vec<Ident>>)> = Vec::new();
+
+        while !input.is_empty() {
+            let attrs = input.call(Attribute::parse_outer)?;
+            let mut variants: Option<Vec<Ident>> = None;
+            for attr in &attrs {
+                if attr.path().is_ident("variant") {
+                    if variants.is_some() {
+                        return Err(Error::new_spanned(
+                            attr,
+                            "duplicate `#[variant(...)]` attribute on a contribution block",
+                        ));
+                    }
+                    let list: Punctuated<Ident, Token![,]> =
+                        attr.parse_args_with(Punctuated::parse_terminated)?;
+                    if list.is_empty() {
+                        return Err(Error::new_spanned(
+                            attr,
+                            "`#[variant(...)]` must name at least one variant; for a contribution that applies to every variant, drop the attribute and use a bare `{ ... }` block",
+                        ));
+                    }
+                    // Validate variant names eagerly so the error points at
+                    // the offending ident rather than at the end of the
+                    // whole macro body.
+                    for v in &list {
+                        if !known_variants.contains(&v.to_string()) {
+                            return Err(Error::new_spanned(
+                                v,
+                                format!("unknown variant `{v}`"),
+                            ));
+                        }
+                    }
+                    variants = Some(list.into_iter().collect());
+                } else {
+                    return Err(Error::new_spanned(
+                        attr,
+                        "only `#[variant(...)]` is permitted on a field contribution block",
+                    ));
+                }
+            }
+
+            let block;
+            braced!(block in input);
+            for f in block.parse::<Bitfields>()?.0 {
+                tagged.push((f, variants.clone()));
+            }
+        }
+
+        // Fan out: per declared variant, union every contribution that
+        // applies and build its Layout.
+        let mut layouts: Vec<Layout> = Vec::new();
+        for ty in types {
+            let variant_ident = ty.def.ident.clone();
+            let mut fields: Vec<Bitfield> = Vec::new();
+            for (field, vs) in &tagged {
+                let belongs = match vs {
+                    None => true,
+                    Some(vs) => vs.iter().any(|v| v == &variant_ident),
+                };
+                if belongs {
+                    fields.push(field.clone());
+                }
+            }
+            layouts.push(Layout::from_parts(ty, fields)?);
+        }
+
+        Ok(Self { layouts })
+    }
+}
+
+impl ToTokens for Multilayout {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        for layout in &self.layouts {
+            layout.to_tokens(tokens);
+        }
     }
 }
