@@ -16,34 +16,34 @@ mod tests {
     layout!({
         struct OneFieldU16(u16);
         {
-            let a: Bits<15, 0>;
+            let a @ 15..0;
         }
     });
 
     layout!({
         struct TwoFieldsU32(u32);
         {
-            let a: Bits<31, 16>;
-            let b: Bits<15, 0>;
+            let a @ 31..16;
+            let b @ 15..0;
         }
     });
 
     layout!({
         struct ThreeFieldsU64(u64);
         {
-            let a: Bits<63, 32>;
-            let b: Bits<31, 16>;
-            let c: Bits<15, 0>;
+            let a @ 63..32;
+            let b @ 31..16;
+            let c @ 15..0;
         }
     });
 
     layout!({
         struct FourFieldsU128(u128);
         {
-            let a: Bits<127, 96>;
-            let b: Bits<95, 64>;
-            let c: Bits<63, 32>;
-            let d: Bits<31, 0>;
+            let a @ 127..96;
+            let b @ 95..64;
+            let c @ 63..32;
+            let d @ 31..0;
         }
     });
 
@@ -74,16 +74,16 @@ mod tests {
     layout!({
         pub struct Example(u64);
         {
-            let u32_repr: Bits<44, 27>;
-            let custom: Bits<26, 23, CustomFieldRepr>;
-            let custom_with_default: Bits<22, 19, CustomFieldRepr> =
+            let u32_repr @ 44..27;
+            let custom @ 26..23: CustomFieldRepr;
+            let custom_with_default @ 22..19: CustomFieldRepr =
                 CustomFieldRepr::Option1;
-            let _: Bits<18, 11> = 0xef;
-            let with_default: Bits<10, 9> = 0b11;
-            let bit: Bit<8>;
-            let u8_repr: Bits<7, 4>;
-            let _: Bits<3, 2> = 1;
-            let _: Bits<1, 0>;
+            let __ @ 18..11 = 0xef;
+            let with_default @ 10..9 = 0b11;
+            let bit @ 8;
+            let u8_repr @ 7..4;
+            let __ @ 3..2 = 1;
+            let __ @ 1..0;
         }
     });
 
@@ -306,14 +306,14 @@ mod tests {
     layout!({
         struct Unshifted(u32);
         {
-            let field: Bits<19, 16>;
+            let field @ 19..16;
             #[unshifted]
-            let unshifted_field: Bits<15, 12>;
-            let _: Bits<11, 9>;
+            let unshifted_field @ 15..12;
+            let __ @ 11..9;
             #[unshifted]
-            let unshifted_bit: Bit<8>;
-            let normal_bit: Bit<7>;
-            let _: Bits<6, 0>;
+            let unshifted_bit @ 8;
+            let normal_bit @ 7;
+            let __ @ 6..0;
         }
     });
 

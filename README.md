@@ -44,13 +44,13 @@ pub enum CustomFieldRepr {
 layout!({
     pub struct Example(u32);
     {
-        let foo: Bits<21, 14>;
-        let custom: Bits<13, 10, CustomFieldRepr>;
-        let bar: Bits<9, 8> = 0b11;
-        let baz: Bit<7>;
-        let frob: Bits<6, 4>;
-        let _: Bits<3, 2> = 1;
-        let _: Bits<1, 0>;
+        let foo @ 21..14;
+        let custom @ 13..10: CustomFieldRepr;
+        let bar @ 9..8 = 0b11;
+        let baz @ 7;
+        let frob @ 6..4;
+        let __ @ 3..2 = 1;
+        let __ @ 1..0;
     }
 });
 

@@ -10,8 +10,8 @@ use quote::{ToTokens, format_ident, quote};
 use syn::parse::{Error, Parse, ParseStream, Result};
 use syn::spanned::Spanned;
 use syn::{
-    Attribute, Expr, ExprLit, Fields, GenericArgument, Ident, ItemStruct, Lit,
-    Pat, Path, PathArguments, Stmt, Type, braced, parse_macro_input,
+    Attribute, Expr, ExprLit, ExprRange, Fields, Ident, ItemStruct, Lit, Pat,
+    PatIdent, RangeLimits, Stmt, Token, Type, braced, parse_macro_input,
     parse_quote,
 };
 
@@ -378,13 +378,37 @@ impl Bitfield {
 impl Parse for Bitfield {
     fn parse(input: ParseStream) -> Result<Self> {
         const INVALID_BITFIELD_DECL_FORM: &str = "bitfield declaration should take one of the following forms:\n\
-            * `let $name: Bit<$bit> (= $default)?;`\n\
-            * `let $name: Bits<$high, $low (, $repr)?> (= $default)?;`\n\
-            * `let _: Bit<$bit> (= $value)?;`\n\
-            * `let _: Bits<$high, $low> (= $value)?;`";
+            * `let $name @ $bit (= $default)?;`\n\
+            * `let $name @ $high..$low (: $repr)? (= $default)?;`\n\
+            * `let __ @ $bit (= $value)?;`\n\
+            * `let __ @ $high..$low (= $value)?;`";
         let err = |spanned: &dyn ToTokens| {
             Error::new_spanned(spanned, INVALID_BITFIELD_DECL_FORM)
         };
+        let wildcard_err = |spanned: &dyn ToTokens| {
+            Error::new_spanned(
+                spanned,
+                "use `__` for reserved fields; bare `_` is not a valid \
+                 identifier in this position",
+            )
+        };
+
+        // `_ @ ...` is not valid Rust grammar (`@` requires an identifier on
+        // its LHS), so syn would fail with a confusing "expected `;`" pointing
+        // at `@`. Intercept that sequence here to issue the right error. Look
+        // past any leading attributes (`#[unshifted]`, doc comments) on a fork
+        // so the diagnostic still fires when the let is attribute-prefixed.
+        let fork = input.fork();
+        let _ = fork.call(Attribute::parse_outer)?;
+        if fork.peek(Token![let])
+            && fork.peek2(Token![_])
+            && fork.peek3(Token![@])
+        {
+            let _: Vec<Attribute> = input.call(Attribute::parse_outer)?;
+            let _: Token![let] = input.parse()?;
+            let underscore: Token![_] = input.parse()?;
+            return Err(wildcard_err(&underscore));
+        }
 
         let stmt = input.parse::<Stmt>()?;
         let Stmt::Local(ref local) = stmt else {
@@ -412,89 +436,105 @@ impl Parse for Bitfield {
             }
         }
 
-        let Pat::Type(ref pat_type) = local.pat else {
-            return Err(err(&local));
+        // syn parks the `: Type` annotation in a `Pat::Type` wrapping the
+        // inner pattern, so a custom repr surfaces here rather than on the
+        // local itself.
+        let (pat_ident, repr): (&PatIdent, Option<Type>) = match &local.pat {
+            // `let foo @ ...;`
+            Pat::Ident(binding) => (binding, None),
+            Pat::Type(typed) => match &*typed.pat {
+                // `let foo @ ...: Repr;`
+                Pat::Ident(binding) => (binding, Some((*typed.ty).clone())),
+                // `let _: T ...;`
+                Pat::Wild(_) => return Err(wildcard_err(&typed.pat)),
+                _ => return Err(err(&local.pat)),
+            },
+            // `let _ = ...;` or `let _;`
+            Pat::Wild(_) => return Err(wildcard_err(&local.pat)),
+            _ => return Err(err(&local.pat)),
         };
 
-        let name: Option<Ident> = match *pat_type.pat {
-            Pat::Ident(ref pat_ident) => {
-                if let Some(by_ref) = &pat_ident.by_ref {
-                    return Err(err(by_ref));
-                }
-                if let Some(mutability) = &pat_ident.mutability {
-                    return Err(err(mutability));
-                }
-                if let Some(subpat) = &pat_ident.subpat {
-                    return Err(err(&subpat.0));
-                }
-                Some(pat_ident.ident.clone())
-            }
-            Pat::Wild(_) => None,
-            _ => return Err(err(&*pat_type.pat)),
-        };
+        if let Some(by_ref) = &pat_ident.by_ref {
+            return Err(Error::new_spanned(
+                by_ref,
+                "`ref` is not permitted on bitfield declarations",
+            ));
+        }
+        if let Some(mutability) = &pat_ident.mutability {
+            return Err(Error::new_spanned(
+                mutability,
+                "`mut` is not permitted on bitfield declarations",
+            ));
+        }
 
-        let path: &Path = if let Type::Path(ref type_path) = *pat_type.ty {
-            if type_path.qself.is_some() {
-                return Err(err(&*pat_type.ty));
-            }
-            &type_path.path
+        let ident_str = pat_ident.ident.to_string();
+        let name: Option<Ident> = if ident_str == "__" {
+            None
+        } else if ident_str.starts_with('_') {
+            return Err(Error::new_spanned(
+                &pat_ident.ident,
+                "leading-underscore identifiers are not permitted on \
+                 bitfields; use `__` for reserved fields, or rename to a \
+                 non-`_`-prefixed identifier",
+            ));
         } else {
-            return Err(err(&*pat_type.ty));
+            Some(pat_ident.ident.clone())
         };
 
-        let get_bits_and_repr = |bits: &mut [usize]| -> Result<Option<Type>> {
-            let args = &path.segments.first().unwrap().arguments;
-            let args = if let PathArguments::AngleBracketed(bracketed) = args {
-                &bracketed.args
-            } else {
-                return Err(err(&args));
-            };
-            if args.len() < bits.len() || args.len() > bits.len() + 1 {
-                return Err(err(&args));
-            }
-            for (i, bit) in bits.iter_mut().enumerate() {
-                let arg = args.get(i).unwrap();
-                match arg {
-                    GenericArgument::Const(Expr::Lit(ExprLit {
-                        lit: Lit::Int(b),
-                        ..
-                    })) => {
-                        *bit = b.base10_parse()?;
-                    }
-                    _ => return Err(err(&arg)),
-                }
-            }
-            if args.len() == bits.len() + 1 {
-                let arg = args.last().unwrap();
-                if let GenericArgument::Type(repr) = arg {
-                    Ok(Some(repr.clone()))
-                } else {
-                    Err(err(&arg))
-                }
-            } else {
-                Ok(None)
+        let Some((_, subpat)) = &pat_ident.subpat else {
+            return Err(Error::new_spanned(
+                local,
+                "missing `@ BIT_RANGE` in bitfield declaration",
+            ));
+        };
+
+        let int_lit_from_expr = |e: &Expr| -> Result<usize> {
+            match e {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Int(i), ..
+                }) => i.base10_parse(),
+                _ => Err(err(e)),
             }
         };
 
-        let type_ident = &path.segments.first().unwrap().ident;
-        let (high, low, repr) = if type_ident == "Bits" {
-            let mut bits = [0usize; 2];
-            let repr = get_bits_and_repr(&mut bits)?;
-            if bits[0] < bits[1] {
-                Err(Error::new_spanned(
-                    &path.segments,
-                    "first high bit, then low",
-                ))
-            } else {
-                Ok((bits[0], bits[1], repr))
+        let (high_bit, low_bit) = match &**subpat {
+            Pat::Lit(ExprLit {
+                lit: Lit::Int(i), ..
+            }) => {
+                let n: usize = i.base10_parse()?;
+                (n, n)
             }
-        } else if type_ident == "Bit" {
-            let mut bit = [0usize; 1];
-            let repr = get_bits_and_repr(&mut bit)?;
-            Ok((bit[0], bit[0], repr))
-        } else {
-            Err(err(path))
-        }?;
+            Pat::Range(
+                range @ ExprRange {
+                    start, end, limits, ..
+                },
+            ) => {
+                if let RangeLimits::Closed(eq) = limits {
+                    return Err(Error::new_spanned(
+                        eq,
+                        "bit ranges use the exclusive `..` token, but both \
+                         endpoints are treated as inclusive bit indices; \
+                         write `H..L`, not `H..=L`",
+                    ));
+                }
+                let (Some(start), Some(end)) = (start, end) else {
+                    return Err(Error::new_spanned(
+                        range,
+                        "bit range requires both endpoints",
+                    ));
+                };
+                let high = int_lit_from_expr(start)?;
+                let low = int_lit_from_expr(end)?;
+                if high < low {
+                    return Err(Error::new_spanned(
+                        range,
+                        "first high bit, then low",
+                    ));
+                }
+                (high, low)
+            }
+            _ => return Err(err(subpat)),
+        };
 
         let default_or_value = if let Some(ref init) = local.init {
             if init.diverge.is_some() {
@@ -512,14 +552,14 @@ impl Parse for Bitfield {
             ));
         }
 
-        if repr.is_some() {
+        if let Some(repr) = &repr {
             if name.is_none() {
                 return Err(Error::new_spanned(
                     repr,
                     "custom representations are not permitted for reserved fields",
                 ));
             }
-            if high == low {
+            if high_bit == low_bit {
                 return Err(Error::new_spanned(
                     repr,
                     "custom representations are not permitted for bits",
@@ -543,8 +583,8 @@ impl Parse for Bitfield {
         Ok(Bitfield {
             span: stmt.span(),
             name,
-            high_bit: high,
-            low_bit: low,
+            high_bit,
+            low_bit,
             repr,
             doc_attrs,
             unshifted,

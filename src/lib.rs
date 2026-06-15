@@ -55,13 +55,13 @@
 //! layout!({
 //!     pub struct Example(u32);
 //!     {
-//!         let foo: Bits<21, 14>;
-//!         let custom: Bits<13, 10, CustomFieldRepr>;
-//!         let bar: Bits<9, 8> = 0b11;
-//!         let baz: Bit<7>;
-//!         let frob: Bits<6, 4>;
-//!         let _: Bits<3, 2> = 1;
-//!         let _: Bits<1, 0>;
+//!         let foo @ 21..14;
+//!         let custom @ 13..10: CustomFieldRepr;
+//!         let bar @ 9..8 = 0b11;
+//!         let baz @ 7;
+//!         let frob @ 6..4;
+//!         let __ @ 3..2 = 1;
+//!         let __ @ 1..0;
 //!     }
 //! });
 //!
@@ -163,8 +163,15 @@ use core::fmt;
 ///     &nbsp;&nbsp;
 ///         <code>let</code>
 ///         <a href="https://doc.rust-lang.org/reference/identifiers.html">IDENTIFIER </a>
-///         <code>:</code>
+///         <code>@</code>
 ///         <em>BitRange</em>
+///         (
+///             <code>:</code>
+///             <em>
+///                 <a href="https://doc.rust-lang.org/reference/types.html">Type </a>
+///             </em>
+///         )
+///         <sup>?</sup>
 ///         (
 ///             <code>=</code>
 ///             <em>
@@ -178,9 +185,7 @@ use core::fmt;
 ///     <em>ReservedBitfield</em>:
 ///     <br>
 ///     &nbsp;&nbsp;
-///         <code>let</code>
-///         <code>_</code>
-///         <code>:</code>
+///         <code>let __ @</code>
 ///         <em>BitRange</em>
 ///         (
 ///             <code>=</code>
@@ -195,21 +200,13 @@ use core::fmt;
 ///     <em>BitRange</em>:
 ///     <br>
 ///     &nbsp;&nbsp;&nbsp;&nbsp;
-///         <code>Bit<</code>
 ///         <a href="https://doc.rust-lang.org/reference/tokens.html#integer-literals">INTEGER_LITERAL </a>
-///         <code>></code>
 ///     <br>
 ///     &nbsp;&nbsp;|&nbsp;
-///         <code>Bits<</code>
 ///         <a href="https://doc.rust-lang.org/reference/tokens.html#integer-literals">INTEGER_LITERAL </a>
-///         <code>,</code>
+///         <code>..</code>
 ///         <a href="https://doc.rust-lang.org/reference/tokens.html#integer-literals">INTEGER_LITERAL </a>
-///         (
-///             <code>,</code>
-///             <a href="https://doc.rust-lang.org/reference/identifiers.html">IDENTIFIER </a>
-///         )
-///         <sup>?</sup>
-///         <code>></code><br>
+///     <br>
 ///     <br>
 ///     <em>UnsignedBaseType</em>:<br>
 ///     &nbsp;&nbsp;
@@ -221,6 +218,10 @@ use core::fmt;
 ///     <br>
 ///     <br>
 /// </blockquote>
+///
+/// Despite the exclusive `..` token, both endpoints of a <em>`BitRange`</em>
+/// are treated as inclusive bit indices; see
+/// [Named and reserved fields](#named-and-reserved-fields).
 ///
 /// # Guiding example
 ///
@@ -237,13 +238,13 @@ use core::fmt;
 /// layout!({
 ///     pub struct Example(u32);
 ///     {
-///         let foo: Bits<21, 14>;
-///         let custom: Bits<13, 10, CustomFieldRepr>;
-///         let bar: Bits<9, 8> = 0b11;
-///         let baz: Bit<7>;
-///         let frob: Bits<6, 4>;
-///         let _: Bits<3, 2> = 1;
-///         let _: Bits<1, 0>;
+///         let foo @ 21..14;
+///         let custom @ 13..10: CustomFieldRepr;
+///         let bar @ 9..8 = 0b11;
+///         let baz @ 7;
+///         let frob @ 6..4;
+///         let __ @ 3..2 = 1;
+///         let __ @ 1..0;
 ///    }
 /// });
 /// ```
@@ -300,15 +301,15 @@ use core::fmt;
 /// Bitfields are defined in the block following the layout type definition, and
 /// each is defined with a let statement of one of the following forms:
 ///
-/// * `let $name: Bit<$bit> (= $default)?;`
-/// * `let $name: Bits<$high, $low (, $repr)?> (= $default)?;`
-/// * `let _: Bit<$bit> (= $value)?;`
-/// * `let _: Bits<$high, $low> (= $value)?;`
+/// * `let $name @ $bit (= $default)?;`
+/// * `let $name @ $high..$low (: $repr)? (= $default)?;`
+/// * `let __ @ $bit (= $value)?;`
+/// * `let __ @ $high..$low (= $value)?;`
 ///
-/// Reserved fields naturally correspond to the wildcard identifier, and will
-/// yield no accessors. The psuedo-types of `Bit<$bit>` and `Bits<$high, $low>`
-/// indicate the inclusive range of bits covered by the field. Fields that span
-/// a single bit are referred to as _width-1_ fields.
+/// Reserved fields are denoted by the identifier `__`, and yield no accessors.
+/// A bare bit index `$bit` or range `$high..$low` (inclusive at both ends,
+/// despite the exclusive-range token) indicates the bits covered by the field.
+/// Fields that span a single bit are referred to as _width-1_ fields.
 ///
 /// A width-1 field named `foo` will yield a getter and setter of that bit's
 /// content of the forms

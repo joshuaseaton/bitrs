@@ -9,13 +9,13 @@ use bitfld::layout;
 layout!({
     pub struct Example(u64);
     {
-        let _: Bits<63, 32> = 0;
-        let foo: Bits<18, 11>;
-        let bar: Bits<10, 9> = 0b11;
-        let baz: Bit<8>;
-        let frob: Bits<7, 4>;
-        let _: Bits<3, 2> = 1;
-        let _: Bits<1, 0>;
+        let __ @ 63..32 = 0;
+        let foo @ 18..11;
+        let bar @ 10..9 = 0b11;
+        let baz @ 8;
+        let frob @ 7..4;
+        let __ @ 3..2 = 1;
+        let __ @ 1..0;
     }
 });
 

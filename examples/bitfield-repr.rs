@@ -24,9 +24,9 @@ pub enum RiscvSatpMode {
 layout!({
     pub struct RiscvSatp(u64);
     {
-        let mode: Bits<63, 60, RiscvSatpMode>; // Virtual addressing mode
-        let asid: Bits<59, 44>; // Address Space IDentifier
-        let ppn: Bits<43, 0>; // Physical Page Number
+        let mode @ 63..60: RiscvSatpMode; // Virtual addressing mode
+        let asid @ 59..44; // Address Space IDentifier
+        let ppn @ 43..0; // Physical Page Number
     }
 });
 
