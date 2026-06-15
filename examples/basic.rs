@@ -6,16 +6,32 @@
 
 use bitfld::layout;
 
+// Models the x86 EFLAGS register.
 layout!({
-    pub struct Example(u64);
+    pub struct Eflags(u32);
     {
-        let __ @ 63..32 = 0;
-        let foo @ 18..11;
-        let bar @ 10..9 = 0b11;
-        let baz @ 8;
-        let frob @ 7..4;
-        let __ @ 3..2 = 1;
-        let __ @ 1..0;
+        let __ @ 31..22 = 0;
+        let id @ 21;        // ID flag
+        let vip @ 20;       // Virtual interrupt pending
+        let vif @ 19;       // Virtual interrupt
+        let ac @ 18;        // Alignment check / access control
+        let vm @ 17;        // Virtual-8086 mode
+        let rf @ 16;        // Resume flag
+        let __ @ 15 = 0;
+        let nt @ 14;        // Nested task
+        let iopl @ 13..12;  // I/O privilege level
+        let of @ 11;        // Overflow flag
+        let df @ 10;        // Direction flag
+        let if_ @ 9 = 1;    // Interrupt enable flag
+        let tf @ 8;         // Trap flag
+        let sf @ 7;         // Sign flag
+        let zf @ 6;         // Zero flag
+        let __ @ 5 = 0;
+        let af @ 4;         // Auxiliary carry flag
+        let __ @ 3 = 0;
+        let pf @ 2;         // Parity flag
+        let __ @ 1 = 1;
+        let cf @ 0;         // Carry flag
     }
 });
 
@@ -30,13 +46,13 @@ fn main() {
         };
     }
 
-    let new = Example::new();
-    let default = Example::default();
-    let custom = *Example::new()
-        .set_foo(0x1a)
-        .set_bar(0b01)
-        .set_baz(true)
-        .set_frob(0xb);
+    let new = Eflags::new();
+    let default = Eflags::default();
+    let custom = *Eflags::new()
+        .set_iopl(0b11)
+        .set_if_(true)
+        .set_zf(true)
+        .set_cf(true);
 
     print_formatted!(new);
     print_formatted!(default);
