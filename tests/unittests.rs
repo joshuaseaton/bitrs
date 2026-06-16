@@ -6,7 +6,7 @@
 
 #[cfg(test)]
 mod tests {
-    use bitfld::{FieldMetadata, bitfield_repr, layout, multilayout};
+    use bitrs::{FieldMetadata, bitfield_repr, layout, multilayout};
 
     layout!({
         struct EmptyU8(u8);

@@ -5,11 +5,11 @@
 # https://opensource.org/licenses/MIT
 
 [package]
-name = "bitfld-macro"
+name = "bitrs-macro"
 version.workspace = true
 edition.workspace = true
 
-description = "Macro library supporting bitfld"
+description = "Macro library supporting bitrs"
 
 license.workspace = true
 readme.workspace = true

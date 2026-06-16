@@ -6,11 +6,11 @@
 
 #![cfg_attr(not(test), no_std)]
 
-//! `bitfld` is a no-std crate for ergonomically specifying layouts of bitfields
-//! over integral types. While the aim is to be general-purpose, the imagined user
-//! is a systems programmer uncomfortably hunched over an architectural manual or
-//! hardware spec, looking to transcribe register layouts into Rust with minimal
-//! fuss.
+//! `bitrs` ("bitters") is a no-std crate for ergonomically specifying layouts
+//! of bitfields over integral types. While the aim is to be general-purpose,
+//! the imagined user is a systems programmer uncomfortably hunched over an
+//! architectural manual or hardware spec, looking to transcribe register
+//! layouts into Rust with minimal fuss.
 //!
 //! The heavy lifting is done by the [`layout!`] procedural macro. Care
 //! is taken to generate readable and efficient code. The [`zerocopy`][zerocopy]
@@ -44,7 +44,7 @@
 //! ## Example
 //!
 //! ```rust
-//! use bitfld::{bitfield_repr, layout};
+//! use bitrs::{bitfield_repr, layout};
 //!
 //! #[bitfield_repr(u8)]
 //! pub enum CustomFieldRepr {
@@ -227,7 +227,7 @@ use core::fmt;
 ///
 /// Consider the following:
 /// ```rust
-/// use bitfld::{bitfield_repr, layout};
+/// use bitrs::{bitfield_repr, layout};
 ///
 /// #[bitfield_repr(u8)]
 /// pub enum CustomFieldRepr {
@@ -359,7 +359,7 @@ use core::fmt;
 /// corresponding getter and setter are of the forms
 ///
 /// ```text
-/// const fn foo(&self) -> Result<$repr, bitfld::InvalidBits<MinWidth<$high, $low>>
+/// const fn foo(&self) -> Result<$repr, bitrs::InvalidBits<MinWidth<$high, $low>>
 /// where
 ///     $repr: zerocopy::TryFromBytes;
 ///
@@ -412,13 +412,13 @@ use core::fmt;
 /// The layout type admits iterators over field values and metadata. An iterator
 /// can be accessed via `iter()`, and [`IntoIterator`] is implemented by the
 /// layout type and references to it. Its item type is
-/// `($base, &'static bitfld::FieldMetadata<$base>)`. See [`FieldMetadata`] for
+/// `($base, &'static bitrs::FieldMetadata<$base>)`. See [`FieldMetadata`] for
 /// more info.
 ///
 /// Iterators and iteration are both cheap, with the associated metadata being
 /// defined as a static constant.
 ///
-pub use bitfld_macro::layout;
+pub use bitrs_macro::layout;
 
 /// Syntax sugar for defining a layout representation that also auto-derives the
 /// traits required of a custom bitfield representation.
@@ -435,7 +435,7 @@ pub use bitfld_macro::layout;
 ///     ::zerocopy::TryFromBytes,
 /// )]
 /// ```
-pub use bitfld_macro::bitfield_repr;
+pub use bitrs_macro::bitfield_repr;
 
 /// Specifies a family of closely related bitfield layouts in one place,
 /// expanding to one [`layout!`]-equivalent type per declared variant.
@@ -518,7 +518,7 @@ pub use bitfld_macro::bitfield_repr;
 /// their fields apply to.
 ///
 /// ```rust
-/// use bitfld::multilayout;
+/// use bitrs::multilayout;
 ///
 /// multilayout!({
 ///     pub struct Mstatus32(u32);
@@ -597,7 +597,7 @@ pub use bitfld_macro::bitfield_repr;
 /// assert_eq!(m.uxl(), 0b10);
 /// assert_eq!(s.uxl(), 0b10);
 /// ```
-pub use bitfld_macro::multilayout;
+pub use bitrs_macro::multilayout;
 
 #[doc(hidden)]
 #[macro_export]
@@ -680,7 +680,7 @@ impl Unsigned for u32 {}
 impl Unsigned for u64 {}
 impl Unsigned for u128 {}
 
-// Ensures that no type outside of bitfld can implement this type.
+// Ensures that no type outside of bitrs can implement this type.
 mod private {
     pub trait Sealed {}
     impl Sealed for u8 {}

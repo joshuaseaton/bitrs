@@ -50,7 +50,7 @@ pub fn multilayout(item: TokenStream) -> TokenStream {
 }
 
 //
-// Parsing of the bitfld type.
+// Parsing of the bitrs type.
 //
 
 enum BaseType {
@@ -166,7 +166,7 @@ impl Parse for TypeDef {
         } else {
             return Err(Error::new_spanned(
                 &strct.fields,
-                "bitfld type must be defined as a tuple struct",
+                "bitrs type must be defined as a tuple struct",
             ));
         };
 
@@ -285,14 +285,14 @@ impl Bitfield {
                 #[doc = #get_doc]
                 #[inline]
                 pub const fn #name(&self) -> bool {
-                    ::bitfld::get_bit!(self.0, #low_bit)
+                    ::bitrs::get_bit!(self.0, #low_bit)
                 }
 
                 #(#doc_attrs)*
                 #[doc = #set_doc]
                 #[inline]
                 pub const fn #setter_name(&mut self, value: bool) -> &mut Self {
-                    ::bitfld::set_bit!(self.0, #low_bit, value);
+                    ::bitrs::set_bit!(self.0, #low_bit, value);
                     self
                 }
             };
@@ -305,7 +305,7 @@ impl Bitfield {
         };
 
         let get_clamped = quote! {
-            ::bitfld::get_field!(
+            ::bitrs::get_field!(
                 #base_type,
                 #clamped_type,
                 #high_bit,
@@ -316,7 +316,7 @@ impl Bitfield {
         };
 
         let set_clamped = quote! {
-            ::bitfld::set_field!(
+            ::bitrs::set_field!(
                 #base_type,
                 #high_bit,
                 #low_bit,
@@ -332,7 +332,7 @@ impl Bitfield {
                 #[doc = #get_doc]
                 #[inline]
                 pub fn #name(&self)
-                    -> ::core::result::Result<#repr, ::bitfld::InvalidBits<#clamped_type>>
+                    -> ::core::result::Result<#repr, ::bitrs::InvalidBits<#clamped_type>>
                 where
                     #repr: ::zerocopy::TryFromBytes,
                 {
@@ -340,7 +340,7 @@ impl Bitfield {
                     use ::zerocopy::TryFromBytes;
                     let value = #get_clamped ;
                     #repr::try_read_from_bytes(value.as_bytes())
-                        .map_err(|_| ::bitfld::InvalidBits(value))
+                        .map_err(|_| ::bitrs::InvalidBits(value))
                 }
             }
         } else {
@@ -628,7 +628,7 @@ impl Layout {
             let high_bit = field.high_bit;
             let low_bit = Literal::usize_unsuffixed(field.low_bit);
             let shifted_mask =
-                quote! {::bitfld::shifted_mask!(#base, #high_bit, #low_bit) };
+                quote! {::bitrs::shifted_mask!(#base, #high_bit, #low_bit) };
 
             let mask_name = format_ident!("{name_upper}_MASK");
             let mask_doc = format!("Unshifted bitmask of `{name_lower}`.");
@@ -667,7 +667,7 @@ impl Layout {
                 quote! { 0 }
             };
             field_metadata.push(quote! {
-                ::bitfld::FieldMetadata::<#base>{
+                ::bitrs::FieldMetadata::<#base>{
                     name: #name_lower,
                     high_bit: #high_bit,
                     low_bit: #low_bit,
@@ -685,7 +685,7 @@ impl Layout {
             let high_bit = rsvd.high_bit;
             let low_bit = Literal::usize_unsuffixed(rsvd.low_bit);
             let shifted_mask =
-                quote! {::bitfld::shifted_mask!(#base, #high_bit, #low_bit) };
+                quote! {::bitrs::shifted_mask!(#base, #high_bit, #low_bit) };
             let name = format_ident!("RSVD_{}_{}", rsvd.high_bit, rsvd.low_bit);
 
             field_constants.push(quote! {
@@ -705,7 +705,7 @@ impl Layout {
             #[doc(hidden)]
             const NUM_FIELDS: usize = #num_fields;
             /// Metadata of all named fields in the layout.
-            pub const FIELDS: [::bitfld::FieldMetadata::<#base>; #num_fields] = [
+            pub const FIELDS: [::bitrs::FieldMetadata::<#base>; #num_fields] = [
                 #(#field_metadata)*
             ];
         });
@@ -760,7 +760,7 @@ impl Layout {
             #vis struct #iter_type(#base, usize, usize);
 
             impl ::core::iter::Iterator for #iter_type {
-                type Item = (&'static ::bitfld::FieldMetadata<#base>, #base);
+                type Item = (&'static ::bitrs::FieldMetadata<#base>, #base);
 
                 fn next(&mut self) -> Option<Self::Item> {
                     if self.1 >= self.2 {
@@ -789,7 +789,7 @@ impl Layout {
 
             impl #ty {
                 /// Returns an iterator over
-                /// ([metadata][`bitfld::FieldMetadata`], value) pairs for each
+                /// ([metadata][`bitrs::FieldMetadata`], value) pairs for each
                 /// field.
                 pub fn iter(&self) -> #iter_type {
                     #iter_type(self.0, 0, Self::NUM_FIELDS)
@@ -797,14 +797,14 @@ impl Layout {
             }
 
             impl ::core::iter::IntoIterator for #ty {
-                type Item = (&'static ::bitfld::FieldMetadata<#base>, #base);
+                type Item = (&'static ::bitrs::FieldMetadata<#base>, #base);
                 type IntoIter = #iter_type;
 
                 fn into_iter(self) -> Self::IntoIter { #iter_type(self.0, 0, Self::NUM_FIELDS) }
             }
 
             impl<'a> ::core::iter::IntoIterator for &'a #ty {
-                type Item = (&'static ::bitfld::FieldMetadata<#base>, #base);
+                type Item = (&'static ::bitrs::FieldMetadata<#base>, #base);
                 type IntoIter = #iter_type;
 
                 fn into_iter(self) -> Self::IntoIter { #iter_type(self.0, 0, #ty::NUM_FIELDS) }

@@ -1,4 +1,4 @@
-`bitfld` is a no-std crate for ergonomically specifying layouts of bitfields
+`bitrs` is a no-std crate for ergonomically specifying layouts of bitfields
 over integral types. While the aim is to be general-purpose, the imagined user
 is a systems programmer uncomfortably hunched over an architectural manual or
 hardware spec, looking to transcribe register layouts into Rust with minimal
@@ -33,7 +33,7 @@ For more detail, see `layout!`.
 ## Example
 
 ```rust
-use bitfld::{bitfield_repr, layout};
+use bitrs::{bitfield_repr, layout};
 
 #[bitfield_repr(u8)]
 pub enum CustomFieldRepr {

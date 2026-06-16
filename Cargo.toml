@@ -5,7 +5,7 @@
 # https://opensource.org/licenses/MIT
 
 [workspace]
-members = [ ".", "bitfld-macro" ]
+members = [ ".", "bitrs-macro" ]
 
 [workspace.package]
 version = "0.9.1"
@@ -13,7 +13,7 @@ edition = "2024"
 
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/joshuaseaton/bitfld"
+repository = "https://github.com/joshuaseaton/bitrs"
 
 [workspace.lints.clippy]
 all = {level = "deny", priority = -1 }
@@ -22,7 +22,7 @@ too_many_arguments = "allow"
 too_many_lines = "allow"
 
 [package]
-name = "bitfld"
+name = "bitrs"
 version.workspace = true
 edition.workspace = true
 
@@ -38,7 +38,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-bitfld-macro = { path = "bitfld-macro" }
+bitrs-macro = { path = "bitrs-macro" }
 
 [dev-dependencies]
 zerocopy = { version = "0.8", features = [ "derive" ] }

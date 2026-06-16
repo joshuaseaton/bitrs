@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT
 
-use bitfld::{bitfield_repr, layout};
+use bitrs::{bitfield_repr, layout};
 
 // Options for satp.MODE.
 #[bitfield_repr(u8)]

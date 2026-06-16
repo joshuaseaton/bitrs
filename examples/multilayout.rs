@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT
 
-use bitfld::multilayout;
+use bitrs::multilayout;
 
 multilayout!({
     pub struct Mstatus32(u32);
