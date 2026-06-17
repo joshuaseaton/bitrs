@@ -39,8 +39,6 @@ workspace = true
 
 [dependencies]
 bitrs-macro = { path = "bitrs-macro" }
-
-[dev-dependencies]
 zerocopy = { version = "0.8", features = [ "derive" ] }
 
 [[example]]

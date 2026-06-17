@@ -28,9 +28,9 @@ pub fn bitfield_repr(attr: TokenStream, item: TokenStream) -> TokenStream {
             Debug,
             Eq,
             PartialEq,
-            ::zerocopy::Immutable,
-            ::zerocopy::IntoBytes,
-            ::zerocopy::TryFromBytes,
+            ::bitrs::__zerocopy::Immutable,
+            ::bitrs::__zerocopy::IntoBytes,
+            ::bitrs::__zerocopy::TryFromBytes,
         )]
         #item
     }
@@ -334,10 +334,10 @@ impl Bitfield {
                 pub fn #name(&self)
                     -> ::core::result::Result<#repr, ::bitrs::InvalidBits<#clamped_type>>
                 where
-                    #repr: ::zerocopy::TryFromBytes,
+                    #repr: ::bitrs::__zerocopy::TryFromBytes,
                 {
-                    use ::zerocopy::IntoBytes;
-                    use ::zerocopy::TryFromBytes;
+                    use ::bitrs::__zerocopy::IntoBytes;
+                    use ::bitrs::__zerocopy::TryFromBytes;
                     let value = #get_clamped ;
                     #repr::try_read_from_bytes(value.as_bytes())
                         .map_err(|_| ::bitrs::InvalidBits(value))
@@ -360,10 +360,10 @@ impl Bitfield {
                 #[inline]
                 pub fn #setter_name(&mut self, value: #repr) -> &mut Self
                 where
-                    #repr: ::zerocopy::IntoBytes + ::zerocopy::Immutable
+                    #repr: ::bitrs::__zerocopy::IntoBytes + ::bitrs::__zerocopy::Immutable
                  {
-                    use ::zerocopy::IntoBytes;
-                    use ::zerocopy::FromBytes;
+                    use ::bitrs::__zerocopy::IntoBytes;
+                    use ::bitrs::__zerocopy::FromBytes;
                     const { assert!(::core::mem::size_of::<#repr>() == ::core::mem::size_of::<#clamped_type>()) }
                     let value = #clamped_type::read_from_bytes(value.as_bytes()).unwrap() as #base_type;
                     #set_clamped ;
