@@ -458,9 +458,10 @@ pub use bitrs_macro::bitfield_repr;
 /// declared variant) or variant-tagged (`#[variant(V, ...)] { ... }` — applies
 /// only to the listed variants). Block order is irrelevant; each
 /// contribution's fields union into the matching per-variant field lists.
-/// Each field name may appear at most once per variant; declaring the same
-/// name in two contributions that both apply to a variant is rejected as an
-/// overlap inside that variant.
+/// Each field name may appear at most once per variant, and field bit ranges
+/// may not overlap within a variant; declaring the same name twice, or
+/// declaring two fields whose ranges overlap, in any combination of
+/// contributions that all apply to a given variant is an error.
 ///
 /// # Syntax
 ///

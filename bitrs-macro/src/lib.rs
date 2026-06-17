@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT#
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use proc_macro::TokenStream;
 use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
@@ -948,25 +948,45 @@ impl Layout {
     fn from_parts(ty: TypeDef, mut fields: Vec<Bitfield>) -> Result<Self> {
         fields.sort_by_key(|field| field.low_bit);
 
-        for pair in fields.windows(2) {
-            let (curr, next) = (&pair[0], &pair[1]);
-            if curr.high_bit >= next.low_bit {
-                // TODO(https://github.com/rust-lang/rust/issues/54725): It
-                // would be nice to Span::join() the two spans, but that's
-                // still experimental.
+        // TODO(https://github.com/rust-lang/rust/issues/54725): For the
+        // overlap diagnostic, it would be nice to Span::join() the two
+        // spans, but that's still experimental.
+        let mut seen: HashMap<String, &Bitfield> = HashMap::new();
+        let mut prev: Option<&Bitfield> = None;
+        for field in &fields {
+            if let Some(prev) = prev
+                && prev.high_bit >= field.low_bit
+            {
                 return Err(Error::new(
-                    next.span,
+                    field.span,
                     format!(
                         "{} ({} {}) overlaps with {} ({} {})",
-                        next.display_name(),
-                        next.display_kind(),
-                        next.display_range(),
-                        curr.display_name(),
-                        curr.display_kind(),
-                        curr.display_range(),
+                        field.display_name(),
+                        field.display_kind(),
+                        field.display_range(),
+                        prev.display_name(),
+                        prev.display_kind(),
+                        prev.display_range(),
                     ),
                 ));
             }
+            if let Some(name) = &field.name {
+                let key = name.to_string();
+                if let Some(prev_named) = seen.get(&key) {
+                    return Err(Error::new(
+                        field.span,
+                        format!(
+                            "field `{key}` declared twice ({} {} and {} {})",
+                            prev_named.display_kind(),
+                            prev_named.display_range(),
+                            field.display_kind(),
+                            field.display_range(),
+                        ),
+                    ));
+                }
+                seen.insert(key, field);
+            }
+            prev = Some(field);
         }
 
         let highest_possible = ty.base.ty.high_bit();
