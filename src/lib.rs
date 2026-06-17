@@ -658,11 +658,7 @@ macro_rules! set_field {
 
         $int &= !UNSHIFTED_MASK;
         if $shifted {
-            // Why??
-            const WIDTH: usize = $high_bit - $low_bit + 1;
-            if WIDTH >= 8 && WIDTH.is_power_of_two() {
-                debug_assert!(($value & !SHIFTED_MASK) == 0);
-            }
+            debug_assert!(($value & !SHIFTED_MASK) == 0);
             $int |= ($value & SHIFTED_MASK) << $low_bit;
         } else {
             debug_assert!(($value & !UNSHIFTED_MASK) == 0);
