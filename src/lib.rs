@@ -419,7 +419,7 @@ pub use ::zerocopy as __zerocopy;
 /// The layout type admits iterators over field values and metadata. An iterator
 /// can be accessed via `iter()`, and [`IntoIterator`] is implemented by the
 /// layout type and references to it. Its item type is
-/// `($base, &'static bitrs::FieldMetadata<$base>)`. See [`FieldMetadata`] for
+/// `(&'static bitrs::FieldMetadata<$base>, $base)`. See [`FieldMetadata`] for
 /// more info.
 ///
 /// Iterators and iteration are both cheap, with the associated metadata being
@@ -702,7 +702,7 @@ pub struct InvalidBits<Base: Unsigned>(pub Base);
 /// The metadata of a (non-reserved) bitfield.
 ///
 /// The iterator of a [`layout!`] type will have an associated item type of
-/// `(Base, &'static FieldMetadata<Base>)`.
+/// `(&'static FieldMetadata<Base>, Base)`.
 #[derive(Debug)]
 pub struct FieldMetadata<Base: Unsigned> {
     /// The name of the bitfield.
