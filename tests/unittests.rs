@@ -167,11 +167,8 @@ mod tests {
                 | Example::RSVD1_MASK,
         );
         assert_eq!(example.u32_repr(), 0xabcd);
-        assert_eq!(example.custom().unwrap(), CustomFieldRepr::Option1);
-        assert_eq!(
-            example.custom_with_default().unwrap(),
-            CustomFieldRepr::Option2
-        );
+        assert_eq!(example.custom(), CustomFieldRepr::Option1);
+        assert_eq!(example.custom_with_default(), CustomFieldRepr::Option2);
         assert_eq!(example.with_default(), 0b10);
         assert!(example.bit());
         assert_eq!(example.u8_repr(), 0xc);
@@ -187,11 +184,8 @@ mod tests {
             .set_bit(true)
             .set_u8_repr(0xc);
         assert_eq!(example.u32_repr(), 0xabcd);
-        assert_eq!(example.custom().unwrap(), CustomFieldRepr::Option1);
-        assert_eq!(
-            example.custom_with_default().unwrap(),
-            CustomFieldRepr::Option2
-        );
+        assert_eq!(example.custom(), CustomFieldRepr::Option1);
+        assert_eq!(example.custom_with_default(), CustomFieldRepr::Option2);
         assert_eq!(example.with_default(), 0b10);
         assert!(example.bit());
         assert_eq!(example.u8_repr(), 0xc);

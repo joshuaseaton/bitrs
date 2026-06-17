@@ -59,7 +59,7 @@ fn main() {
         .set_custom(CustomFieldRepr::Option2)
         .set_frob(0x7);
     assert_eq!(example.foo(), 0);
-    assert_eq!(example.custom().unwrap(), CustomFieldRepr::Option2);
+    assert_eq!(example.custom(), CustomFieldRepr::Option2);
     assert_eq!(example.bar(), 0b11);
     assert_eq!(example.baz(), false);
     assert_eq!(example.frob(), 0x7);

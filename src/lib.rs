@@ -70,7 +70,7 @@
 //!     .set_custom(CustomFieldRepr::Option2)
 //!     .set_frob(0x7);
 //! assert_eq!(example.foo(), 0);
-//! assert_eq!(example.custom().unwrap(), CustomFieldRepr::Option2);
+//! assert_eq!(example.custom(), CustomFieldRepr::Option2);
 //! assert_eq!(example.bar(), 0b11);
 //! assert_eq!(example.baz(), false);
 //! assert_eq!(example.frob(), 0x7);
@@ -363,21 +363,25 @@ pub use ::zerocopy as __zerocopy;
 ///
 /// Fields (of width > 1) can be given more structure with a _custom
 /// representation_, which is a type specified as `$repr` above. The
-/// corresponding getter and setter are of the forms
+/// corresponding getters and setter are of the forms
 ///
 /// ```text
-/// const fn foo(&self) -> Result<$repr, bitrs::InvalidBits<MinWidth<$high, $low>>
+/// fn foo(&self) -> $repr
 /// where
 ///     $repr: zerocopy::TryFromBytes;
 ///
-/// const fn set_foo(&mut self, value: $repr)
+/// fn try_foo(&self) -> Result<$repr, bitrs::InvalidBits<MinWidth<$high, $low>>>
+/// where
+///     $repr: zerocopy::TryFromBytes;
+///
+/// fn set_foo(&mut self, value: $repr)
 /// where
 ///     $repr: zerocopy::IntoBytes + zerocopy::Immutable;
 /// ```
 ///
-/// Not all bit patterns are necessarily valid with a custom representation;
-/// for such cases, the getter returns a [`InvalidBits`] error type wrapping the
-/// invalid pattern.
+/// Not all bit patterns are necessarily valid with a custom representation.
+/// `foo` panics on an invalid pattern; `try_foo` returns an [`InvalidBits`]
+/// error wrapping the invalid pattern.
 ///
 /// A custom representation must - definitionally - satisfy the three zerocopy
 /// traits above, which are leveraged for safe and efficient transmutation

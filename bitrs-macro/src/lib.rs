@@ -326,12 +326,35 @@ impl Bitfield {
             )
         };
 
+        // TODO: Custom-repr getter/setter can't be `const fn` until
+        // `zerocopy::TryFromBytes` / `IntoBytes` have const methods.
+        // Tracking upstream: https://github.com/google/zerocopy/issues/115.
         let getter = if let Some(repr) = &self.repr {
+            let try_name = format_ident!("try_{}", name);
+            let try_get_doc =
+                format!("Fallible variant of [`Self::{name}`].");
+            let panic_doc = format!(
+                "# Panics\n\n\
+                 Panics if the field's bit pattern is not a valid value of \
+                 the custom representation. Use [`Self::{try_name}`] to \
+                 recover from invalid bit patterns."
+            );
             quote! {
                 #(#doc_attrs)*
                 #[doc = #get_doc]
+                ///
+                #[doc = #panic_doc]
                 #[inline]
-                pub fn #name(&self)
+                pub fn #name(&self) -> #repr
+                where
+                    #repr: ::bitrs::__zerocopy::TryFromBytes,
+                {
+                    self.#try_name().unwrap()
+                }
+
+                #[doc = #try_get_doc]
+                #[inline]
+                pub fn #try_name(&self)
                     -> ::core::result::Result<#repr, ::bitrs::InvalidBits<#clamped_type>>
                 where
                     #repr: ::bitrs::__zerocopy::TryFromBytes,
@@ -849,6 +872,8 @@ impl Layout {
                 integral_specifier
             };
             if field.repr.is_some() {
+                let try_name =
+                    format_ident!("try_{}", name.as_ref().unwrap());
                 let ok_format_string =
                     format!("{{indent}}{name_str}: {{:#?}},{{sep}}");
                 let ok_format_string = Literal::string(&ok_format_string);
@@ -858,7 +883,7 @@ impl Layout {
                 let err_format_string = Literal::string(&err_format_string);
                 quote! {
                     {
-                        match self.#name() {
+                        match self.#try_name() {
                             Ok(value) => write!(f, #ok_format_string, value),
                             Err(invalid) => write!(f, #err_format_string, invalid.0),
                         }?;
