@@ -21,14 +21,14 @@ pub enum RiscvSatpMode {
 
 // Models the RISC-V satp (Supervisor Address Translation and Protection)
 // system register.
-layout!({
+layout! {
     pub struct RiscvSatp(u64);
     {
         let mode @ 63..60: RiscvSatpMode; // Virtual addressing mode
         let asid @ 59..44; // Address Space IDentifier
         let ppn @ 43..0; // Physical Page Number
     }
-});
+}
 
 fn main() {
     let satp = *RiscvSatp::new()

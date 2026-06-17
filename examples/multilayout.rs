@@ -6,7 +6,7 @@
 
 use bitrs::multilayout;
 
-multilayout!({
+multilayout! {
     pub struct Mstatus32(u32);
     pub struct Mstatus64(u64);
     pub struct Sstatus32(u32);
@@ -58,7 +58,7 @@ multilayout!({
         let spie @ 5;
         let sie @ 1;
     }
-});
+}
 
 fn main() {
     let m32 = *Mstatus32::new()
