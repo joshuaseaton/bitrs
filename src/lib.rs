@@ -52,7 +52,7 @@
 //!     Option2 = 0xf,
 //! }
 //!
-//! layout! {
+//! layout!({
 //!     pub struct Example(u32);
 //!     {
 //!         let foo @ 21..14;
@@ -63,7 +63,7 @@
 //!         let __ @ 3..2 = 1;
 //!         let __ @ 1..0;
 //!     }
-//! }
+//! });
 //!
 //!
 //! let example = *Example::default()
@@ -121,10 +121,12 @@ pub use ::zerocopy as __zerocopy;
 ///     <em>Layout</em>:
 ///     <br>
 ///     &nbsp;&nbsp;
-///         <em>LayoutType</em>
 ///         <code>{</code>
-///             <em>Bitfield</em>
-///             <sup>*</sup>
+///             <em>LayoutType</em>
+///             <code>{</code>
+///                 <em>Bitfield</em>
+///                 <sup>*</sup>
+///             <code>}</code>
 ///         <code>}</code>
 ///     <br>
 ///     <br>
@@ -240,7 +242,7 @@ pub use ::zerocopy as __zerocopy;
 ///     Option2 = 0xf,
 /// }
 ///
-/// layout! {
+/// layout!({
 ///     pub struct Example(u32);
 ///     {
 ///         let foo @ 21..14;
@@ -251,7 +253,7 @@ pub use ::zerocopy as __zerocopy;
 ///         let __ @ 3..2 = 1;
 ///         let __ @ 1..0;
 ///    }
-/// }
+/// });
 /// ```
 ///
 /// This translates to the following:
@@ -471,10 +473,12 @@ pub use bitrs_macro::bitfield_repr;
 ///     <em>Multilayout</em>:
 ///     <br>
 ///     &nbsp;&nbsp;
-///         <em>VariantHead</em>
-///         <sup>+</sup>
-///         <em>ContributionBlock</em>
-///         <sup>+</sup>
+///         <code>{</code>
+///             <em>VariantHead</em>
+///             <sup>+</sup>
+///             <em>ContributionBlock</em>
+///             <sup>+</sup>
+///         <code>}</code>
 ///     <br>
 ///     <br>
 ///     <em>VariantHead</em>:
@@ -528,7 +532,7 @@ pub use bitrs_macro::bitfield_repr;
 /// ```rust
 /// use bitrs::multilayout;
 ///
-/// multilayout! {
+/// multilayout!({
 ///     pub struct Mstatus32(u32);
 ///     pub struct Mstatus64(u64);
 ///     pub struct Sstatus32(u32);
@@ -581,7 +585,7 @@ pub use bitrs_macro::bitfield_repr;
 ///         let spie @ 5;
 ///         let sie  @ 1;
 ///     }
-/// }
+/// });
 ///
 /// // SD lives at XLEN-1 in every *status variant.
 /// let m32 = *Mstatus32::new().set_sd(true);

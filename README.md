@@ -41,7 +41,7 @@ pub enum CustomFieldRepr {
     Option2 = 0xf,
 }
 
-layout! {
+layout!({
     pub struct Example(u32);
     {
         let foo @ 21..14;
@@ -52,7 +52,7 @@ layout! {
         let __ @ 3..2 = 1;
         let __ @ 1..0;
     }
-}
+});
 
 fn main() {
     let example = *Example::default()

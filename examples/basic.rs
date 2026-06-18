@@ -7,7 +7,7 @@
 use bitrs::layout;
 
 // Models the x86 EFLAGS register.
-layout! {
+layout!({
     pub struct Eflags(u32);
     {
         let __ @ 31..22 = 0;
@@ -33,7 +33,7 @@ layout! {
         let __ @ 1 = 1;
         let cf @ 0; // Carry flag
     }
-}
+});
 
 fn main() {
     macro_rules! print_formatted {

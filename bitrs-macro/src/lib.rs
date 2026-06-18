@@ -1052,6 +1052,12 @@ impl Layout {
 
 impl Parse for Layout {
     fn parse(input: ParseStream) -> Result<Self> {
+        let input = {
+            let content;
+            braced!(content in input);
+            content
+        };
+
         let ty = input.parse::<TypeDef>()?;
 
         let inner = {
@@ -1179,9 +1185,15 @@ fn looks_like_contribution(input: ParseStream) -> bool {
 
 impl Parse for Multilayout {
     fn parse(input: ParseStream) -> Result<Self> {
+        let input = {
+            let content;
+            braced!(content in input);
+            content
+        };
+
         // Phase 1: variant heads.
         let mut types: Vec<TypeDef> = Vec::new();
-        while !looks_like_contribution(input) {
+        while !looks_like_contribution(&input) {
             if input.is_empty() {
                 return Err(Error::new(
                     input.span(),

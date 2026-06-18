@@ -8,36 +8,36 @@
 mod tests {
     use bitrs::{FieldMetadata, bitfield_repr, layout, multilayout};
 
-    layout! {
+    layout!({
         struct EmptyU8(u8);
         {}
-    }
+    });
 
-    layout! {
+    layout!({
         struct OneFieldU16(u16);
         {
             let a @ 15..0;
         }
-    }
+    });
 
-    layout! {
+    layout!({
         struct TwoFieldsU32(u32);
         {
             let a @ 31..16;
             let b @ 15..0;
         }
-    }
+    });
 
-    layout! {
+    layout!({
         struct ThreeFieldsU64(u64);
         {
             let a @ 63..32;
             let b @ 31..16;
             let c @ 15..0;
         }
-    }
+    });
 
-    layout! {
+    layout!({
         struct FourFieldsU128(u128);
         {
             let a @ 127..96;
@@ -45,7 +45,7 @@ mod tests {
             let c @ 63..32;
             let d @ 31..0;
         }
-    }
+    });
 
     #[test]
     fn size_and_alignment() {
@@ -71,7 +71,7 @@ mod tests {
         Option2 = 0xf,
     }
 
-    layout! {
+    layout!({
         pub struct Example(u64);
         {
             let u32_repr @ 44..27;
@@ -85,7 +85,7 @@ mod tests {
             let __ @ 3..2 = 1;
             let __ @ 1..0;
         }
-    }
+    });
 
     #[test]
     fn constants() {
@@ -294,7 +294,7 @@ mod tests {
         }
     }
 
-    layout! {
+    layout!({
         struct Unshifted(u32);
         {
             let field @ 19..16;
@@ -306,7 +306,7 @@ mod tests {
             let normal_bit @ 7;
             let __ @ 6..0;
         }
-    }
+    });
 
     #[test]
     fn unshifted_multi_bit_getter() {
@@ -361,7 +361,7 @@ mod tests {
         assert_eq!(val.unshifted_bit(), 1 << 8);
     }
 
-    multilayout! {
+    multilayout!({
         pub struct Mstatus32(u32);
         pub struct Mstatus64(u64);
         pub struct Sstatus32(u32);
@@ -406,7 +406,7 @@ mod tests {
             let spie @ 5;
             let sie @ 1;
         }
-    }
+    });
 
     #[test]
     fn sd_at_xlen_minus_1() {
