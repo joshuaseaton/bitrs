@@ -449,23 +449,38 @@ pub use bitrs_macro::layout;
 pub use bitrs_macro::bitfield_repr;
 
 /// Specifies a family of closely related bitfield layouts in one place,
-/// expanding to one [`layout!`]-equivalent type per declared variant.
+/// expanding to one [`layout!`]-equivalent type per declared struct.
 ///
-/// `multilayout!` is a strict layering over [`layout!`]: it parses a head of
-/// variant declarations followed by a sequence of *field contribution blocks*,
-/// fans the fields out per variant, and emits the same code that hand-written
+/// `multilayout!` is a strict layering over [`layout!`]: it parses one or
+/// more struct heads followed by a sequence of *field contribution blocks*,
+/// fans the fields out per struct, and emits the same code that hand-written
 /// `layout!` invocations would. There is no shared trait, no const-generic
-/// parameterization, and no runtime relationship between the emitted variant
-/// types.
+/// parameterization, and no runtime relationship between the emitted types.
+///
+/// Each struct head may carry a `#[bitrs(tag, ...)]` attribute declaring the
+/// set of tags that struct participates in. Tags are arbitrary identifiers
+/// (except for the reserved names `all`, `any`, and `not`), and a struct may
+/// declare zero or more.
 ///
 /// Each field contribution block is either bare (`{ ... }` — applies to every
-/// declared variant) or variant-tagged (`#[variant(V, ...)] { ... }` — applies
-/// only to the listed variants). Block order is irrelevant; each
-/// contribution's fields union into the matching per-variant field lists.
-/// Each field name may appear at most once per variant, and field bit ranges
-/// may not overlap within a variant; declaring the same name twice, or
-/// declaring two fields whose ranges overlap, in any combination of
-/// contributions that all apply to a given variant is an error.
+/// declared struct) or predicated (`#[<predicate>] { ... }`), where a
+/// *predicate* is a boolean expression over the declared tags:
+///
+/// * `tag` — true iff the struct carries `tag`;
+/// * `all(<predicate>, ...)` — true iff every inner predicate is true
+///   (the empty `all()` is vacuously true);
+/// * `any(<predicate>, ...)` — true iff some inner predicate is true
+///   (the empty `any()` is vacuously false);
+/// * `not(<predicate>)` — true iff the inner predicate is false.
+///
+/// Predicates nest freely. A contribution applies to a struct iff its
+/// predicate evaluates true against that struct's tag set; an unannotated
+/// block always applies. Block order is irrelevant; each contribution's
+/// fields union into the matching per-struct field lists. Each field name
+/// may appear at most once per struct, and field bit ranges may not overlap
+/// within a struct; declaring the same name twice, or declaring two fields
+/// whose ranges overlap, in any combination of contributions that all apply
+/// to a given struct is an error.
 ///
 /// # Syntax
 ///
@@ -474,15 +489,23 @@ pub use bitrs_macro::bitfield_repr;
 ///     <br>
 ///     &nbsp;&nbsp;
 ///         <code>{</code>
-///             <em>VariantHead</em>
+///             <em>StructHead</em>
 ///             <sup>+</sup>
 ///             <em>ContributionBlock</em>
 ///             <sup>+</sup>
 ///         <code>}</code>
 ///     <br>
 ///     <br>
-///     <em>VariantHead</em>:
-///         &nbsp;same as
+///     <em>StructHead</em>:
+///         &nbsp;
+///         (
+///             <code>#[bitrs(</code>
+///             <em>TagList</em>
+///             <sup>?</sup>
+///             <code>)]</code>
+///         )
+///         <sup>?</sup>
+///         &nbsp;
 ///         <em><a href="macro.layout.html"><code>layout!</code>'s LayoutType</a></em>
 ///     <br>
 ///     <br>
@@ -490,9 +513,9 @@ pub use bitrs_macro::bitfield_repr;
 ///     <br>
 ///     &nbsp;&nbsp;
 ///         (
-///             <code>#[variant(</code>
-///             <em>VariantList</em>
-///             <code>)]</code>
+///             <code>#[</code>
+///             <em>Predicate</em>
+///             <code>]</code>
 ///         )
 ///         <sup>?</sup>
 ///         <code>{</code>
@@ -501,15 +524,32 @@ pub use bitrs_macro::bitfield_repr;
 ///         <code>}</code>
 ///     <br>
 ///     <br>
-///     <em>VariantList</em>:
+///     <em>Predicate</em>:
 ///     <br>
 ///     &nbsp;&nbsp;
-///         <a href="https://doc.rust-lang.org/reference/identifiers.html">IDENTIFIER </a>
-///         (
-///             <code>,</code>
-///             <a href="https://doc.rust-lang.org/reference/identifiers.html">IDENTIFIER </a>
-///         )
-///         <sup>*</sup>
+///         <em>Tag</em>
+///         <br>
+///     &nbsp;|&nbsp;
+///         <code>all(</code> <em>PredicateList</em><sup>?</sup> <code>)</code>
+///         <br>
+///     &nbsp;|&nbsp;
+///         <code>any(</code> <em>PredicateList</em><sup>?</sup> <code>)</code>
+///         <br>
+///     &nbsp;|&nbsp;
+///         <code>not(</code> <em>Predicate</em> <code>)</code>
+///     <br>
+///     <br>
+///     <em>PredicateList</em>:
+///         &nbsp;<em>Predicate</em> ( <code>,</code> <em>Predicate</em> )<sup>*</sup>
+///     <br>
+///     <br>
+///     <em>TagList</em>:
+///         &nbsp;<em>Tag</em> ( <code>,</code> <em>Tag</em> )<sup>*</sup>
+///     <br>
+///     <br>
+///     <em>Tag</em>:
+///         &nbsp;<a href="https://doc.rust-lang.org/reference/identifiers.html">IDENTIFIER </a>
+///         (other than <code>all</code>, <code>any</code>, or <code>not</code>)
 ///     <br>
 ///     <br>
 ///     <em>Bitfield</em>:
@@ -519,75 +559,79 @@ pub use bitrs_macro::bitfield_repr;
 ///     <br>
 /// </blockquote>
 ///
-/// Each <em>`VariantList`</em> identifier must name a struct declared in one
-/// of the preceding <em>`VariantHead`</em>s. The contribution-block sequence
-/// must be non-empty.
+/// Every tag referenced in a predicate must be declared on at least one
+/// struct. The contribution-block sequence must be non-empty.
 ///
 /// # Example
 ///
 /// The RISC-V status-register family — `mstatus` and `sstatus` in both RV32
-/// and RV64 forms. Contribution blocks are grouped by the set of variants
-/// their fields apply to.
+/// and RV64 forms. The M-mode structs are tagged with `m`; every struct is
+/// tagged with its XLEN (`rv32` or `rv64`). Contribution-block predicates
+/// select against those tags.
 ///
 /// ```rust
 /// use bitrs::multilayout;
 ///
 /// multilayout!({
+///     #[bitrs(m, rv32)]
 ///     pub struct Mstatus32(u32);
+///     #[bitrs(m, rv64)]
 ///     pub struct Mstatus64(u64);
+///     #[bitrs(rv32)]
 ///     pub struct Sstatus32(u32);
+///     #[bitrs(rv64)]
 ///     pub struct Sstatus64(u64);
 ///
 ///     // SD sits at XLEN-1 in every *status form.
-///     #[variant(Mstatus32, Sstatus32)]
+///     #[rv32]
 ///     {
 ///         let sd @ 31;
 ///     }
-///     #[variant(Mstatus64, Sstatus64)]
+///     #[rv64]
 ///     {
 ///         let sd @ 63;
 ///     }
 ///
 ///     // RV64 high-half. MBE/SBE/SXL are M-mode only.
-///     #[variant(Mstatus64)]
+///     #[all(m, rv64)]
 ///     {
 ///         let mbe @ 37;
 ///         let sbe @ 36;
 ///         let sxl @ 35..34;
 ///     }
 ///     // UXL is visible from both M and S modes on RV64.
-///     #[variant(Mstatus64, Sstatus64)]
+///     #[rv64]
 ///     {
 ///         let uxl @ 33..32;
 ///     }
 ///
 ///     // M-mode-only low-half fields (WPRI from supervisor's view).
-///     #[variant(Mstatus32, Mstatus64)]
+///     #[m]
 ///     {
-///         let tsr  @ 22;
-///         let tw   @ 21;
-///         let tvm  @ 20;
+///         let tsr @ 22;
+///         let tw @ 21;
+///         let tvm @ 20;
 ///         let mprv @ 17;
-///         let mpp  @ 12..11;
+///         let mpp @ 12..11;
 ///         let mpie @ 7;
-///         let mie  @ 3;
+///         let mie @ 3;
 ///     }
 ///
 ///     // Shared low-half fields.
 ///     {
-///         let mxr  @ 19;
-///         let sum  @ 18;
-///         let xs   @ 16..15;
-///         let fs   @ 14..13;
-///         let vs   @ 10..9;
-///         let spp  @ 8;
-///         let ube  @ 6;
+///         let mxr @ 19;
+///         let sum @ 18;
+///         let xs @ 16..15;
+///         let fs @ 14..13;
+///         let vs @ 10..9;
+///         let spp @ 8;
+///         let ube @ 6;
 ///         let spie @ 5;
-///         let sie  @ 1;
+///         let sie @ 1;
 ///     }
 /// });
 ///
-/// // SD lives at XLEN-1 in every *status variant.
+/// // SD lives at XLEN-1 in every *status form.
 /// let m32 = *Mstatus32::new().set_sd(true);
 /// let m64 = *Mstatus64::new().set_sd(true);
 /// let s32 = *Sstatus32::new().set_sd(true);

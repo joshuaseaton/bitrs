@@ -362,30 +362,34 @@ mod tests {
     }
 
     multilayout!({
+        #[bitrs(m, rv32)]
         pub struct Mstatus32(u32);
+        #[bitrs(m, rv64)]
         pub struct Mstatus64(u64);
+        #[bitrs(rv32)]
         pub struct Sstatus32(u32);
+        #[bitrs(rv64)]
         pub struct Sstatus64(u64);
 
-        #[variant(Mstatus32, Sstatus32)]
+        #[rv32]
         {
             let sd @ 31;
         }
-        #[variant(Mstatus64, Sstatus64)]
+        #[rv64]
         {
             let sd @ 63;
         }
-        #[variant(Mstatus64)]
+        #[all(m, rv64)]
         {
             let mbe @ 37;
             let sbe @ 36;
             let sxl @ 35..34;
         }
-        #[variant(Mstatus64, Sstatus64)]
+        #[rv64]
         {
             let uxl @ 33..32;
         }
-        #[variant(Mstatus32, Mstatus64)]
+        #[m]
         {
             let tsr @ 22;
             let tw @ 21;

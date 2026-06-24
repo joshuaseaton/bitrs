@@ -13,9 +13,9 @@ use syn::parse::{Error, Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
-    Attribute, Expr, ExprLit, ExprRange, Fields, Ident, ItemStruct, Lit, Pat,
-    PatIdent, RangeLimits, Stmt, Token, Type, braced, parse_macro_input,
-    parse_quote, token,
+    Attribute, Expr, ExprLit, ExprRange, Fields, Ident, ItemStruct, Lit, Meta,
+    Pat, PatIdent, RangeLimits, Stmt, Token, Type, braced, parenthesized,
+    parse_macro_input, parse_quote, token,
 };
 
 #[proc_macro_attribute]
@@ -108,11 +108,51 @@ impl TryFrom<Type> for BaseTypeDef {
 struct TypeDef {
     def: ItemStruct,
     base: BaseTypeDef,
+    tags: Vec<Ident>,
 }
 
 impl Parse for TypeDef {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut strct: ItemStruct = input.parse()?;
+
+        // Pull out any `#[bitrs(tag, ...)]` attribute. It's macro-internal: it
+        // declares the tag set the struct participates in for `multilayout!`'s
+        // contribution-predicate evaluation, and is stripped before the struct
+        // is forwarded (since `bitrs` is not a real Rust attribute).
+        let mut tags: Vec<Ident> = Vec::new();
+        for attr in &strct.attrs {
+            if !attr.path().is_ident("bitrs") {
+                continue;
+            }
+            let Meta::List(list) = &attr.meta else {
+                return Err(Error::new_spanned(
+                    attr,
+                    "`#[bitrs(...)]` takes a parenthesized list of tag \
+                     identifiers",
+                ));
+            };
+            let parsed: Punctuated<Ident, Token![,]> =
+                list.parse_args_with(Punctuated::parse_terminated)?;
+            for tag in parsed {
+                let s = tag.to_string();
+                if matches!(s.as_str(), "all" | "any" | "not") {
+                    return Err(Error::new_spanned(
+                        &tag,
+                        format!(
+                            "`{s}` is reserved and cannot be used as a tag name"
+                        ),
+                    ));
+                }
+                if tags.iter().any(|t| t == &tag) {
+                    return Err(Error::new_spanned(
+                        &tag,
+                        format!("duplicate tag `{tag}`"),
+                    ));
+                }
+                tags.push(tag);
+            }
+        }
+        strct.attrs.retain(|a| !a.path().is_ident("bitrs"));
 
         // Check for any redundant derives; all other derives are forwarded. If
         // no repr is specified, then we default to repr(transparent).
@@ -186,6 +226,7 @@ impl Parse for TypeDef {
         Ok(Self {
             def: strct,
             base: base_type,
+            tags,
         })
     }
 }
@@ -195,8 +236,9 @@ impl Parse for TypeDef {
 //
 
 // `Clone` is required because `Multilayout::parse` fans each parsed field out
-// into every variant whose field contribution block names it — a field tagged
-// `#[variant(A, B)]` ends up cloned once for `A` and once for `B`.
+// into every struct whose tag set satisfies the contribution block's
+// predicate — a field in a block predicated on `#[t]` ends up cloned once per
+// matching struct.
 #[derive(Clone)]
 struct Bitfield {
     span: Span,
@@ -331,8 +373,7 @@ impl Bitfield {
         // Tracking upstream: https://github.com/google/zerocopy/issues/115.
         let getter = if let Some(repr) = &self.repr {
             let try_name = format_ident!("try_{}", name);
-            let try_get_doc =
-                format!("Fallible variant of [`Self::{name}`].");
+            let try_get_doc = format!("Fallible variant of [`Self::{name}`].");
             let panic_doc = format!(
                 "# Panics\n\n\
                  Panics if the field's bit pattern is not a valid value of \
@@ -1059,6 +1100,12 @@ impl Parse for Layout {
         };
 
         let ty = input.parse::<TypeDef>()?;
+        if let Some(tag) = ty.tags.first() {
+            return Err(Error::new_spanned(
+                tag,
+                "`#[bitrs(...)]` tags are only meaningful in `multilayout!`",
+            ));
+        }
 
         let inner = {
             let content;
@@ -1147,28 +1194,181 @@ impl ToTokens for Layout {
 }
 
 //
-// `multilayout!`: a family of layouts in one place. Parses one or more
-// `pub struct V(base);` variant heads followed by a sequence of contribution
-// blocks. Each block is either bare (`{ ... }` — applies to every variant)
-// or variant-tagged (`#[variant(V, ...)] { ... }` — applies only to the
-// listed variants). Block order is irrelevant; each contribution's fields
-// union into the matching per-variant field lists. Emits one
-// `Layout`-equivalent stream per declared variant.
+// `multilayout!`: a family of layouts in one place. Parses one or more struct
+// heads — each optionally annotated with `#[bitrs(tag, ...)]` to declare its
+// tag set — followed by a sequence of contribution blocks. Each block is
+// either bare (`{ ... }` — applies to every struct) or predicated
+// (`#[<predicate>] { ... }`). A predicate is a boolean expression over the
+// declared tags: a bare tag identifier, `all(<predicate>, ...)`,
+// `any(<predicate>, ...)`, or `not(<predicate>)`, freely nested. A
+// contribution applies to a struct iff its predicate evaluates true against
+// that struct's tag set; an unannotated block always applies. Block order is
+// irrelevant; each contribution's fields union into the matching per-struct
+// field lists. Emits one `Layout`-equivalent stream per declared struct.
 //
+
+#[derive(Clone)]
+enum Predicate {
+    Tag(Ident),
+    All(Vec<Predicate>),
+    Any(Vec<Predicate>),
+    Not(Box<Predicate>),
+}
+
+impl Predicate {
+    fn eval(&self, tags: &HashSet<String>) -> bool {
+        match self {
+            Predicate::Tag(t) => tags.contains(&t.to_string()),
+            Predicate::All(ps) => ps.iter().all(|p| p.eval(tags)),
+            Predicate::Any(ps) => ps.iter().any(|p| p.eval(tags)),
+            Predicate::Not(p) => !p.eval(tags),
+        }
+    }
+
+    fn collect_tag_refs<'a>(&'a self, out: &mut Vec<&'a Ident>) {
+        match self {
+            Predicate::Tag(t) => out.push(t),
+            Predicate::All(ps) | Predicate::Any(ps) => {
+                for p in ps {
+                    p.collect_tag_refs(out);
+                }
+            }
+            Predicate::Not(p) => p.collect_tag_refs(out),
+        }
+    }
+
+    /// Parses a predicate from a contribution-block outer attribute. The
+    /// attribute's path is the head of the expression (a tag identifier or one
+    /// of the predicate functions `all`/`any`/`not`); arguments, if any, are
+    /// the parenthesized inner predicates.
+    fn from_attr(attr: &Attribute) -> Result<Self> {
+        match &attr.meta {
+            Meta::Path(path) => {
+                let ident = path.get_ident().ok_or_else(|| {
+                    Error::new_spanned(
+                        path,
+                        "predicate must be a bare identifier",
+                    )
+                })?;
+                let s = ident.to_string();
+                if matches!(s.as_str(), "all" | "any" | "not") {
+                    return Err(Error::new_spanned(
+                        ident,
+                        format!("`{s}` requires a parenthesized argument list"),
+                    ));
+                }
+                Ok(Predicate::Tag(ident.clone()))
+            }
+            Meta::List(list) => {
+                let ident = list.path.get_ident().ok_or_else(|| {
+                    Error::new_spanned(
+                        &list.path,
+                        "predicate head must be a bare identifier",
+                    )
+                })?;
+                let name = ident.to_string();
+                match name.as_str() {
+                    "all" => {
+                        let preds: Punctuated<Predicate, Token![,]> =
+                            list.parse_args_with(Punctuated::parse_terminated)?;
+                        Ok(Predicate::All(preds.into_iter().collect()))
+                    }
+                    "any" => {
+                        let preds: Punctuated<Predicate, Token![,]> =
+                            list.parse_args_with(Punctuated::parse_terminated)?;
+                        Ok(Predicate::Any(preds.into_iter().collect()))
+                    }
+                    "not" => {
+                        let inner: Predicate = list.parse_args()?;
+                        Ok(Predicate::Not(Box::new(inner)))
+                    }
+                    _ => Err(Error::new_spanned(
+                        &list.path,
+                        format!(
+                            "unknown predicate function `{name}`; expected \
+                             `all`, `any`, `not`, or a bare tag identifier"
+                        ),
+                    )),
+                }
+            }
+            Meta::NameValue(_) => Err(Error::new_spanned(
+                attr,
+                "name-value attribute form is not a valid predicate",
+            )),
+        }
+    }
+}
+
+impl Parse for Predicate {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let ident: Ident = input.parse()?;
+        let name = ident.to_string();
+        let has_paren = input.peek(token::Paren);
+        match name.as_str() {
+            "all" | "any" => {
+                if !has_paren {
+                    return Err(Error::new_spanned(
+                        &ident,
+                        format!(
+                            "`{name}` requires a parenthesized argument list"
+                        ),
+                    ));
+                }
+                let content;
+                parenthesized!(content in input);
+                let preds: Punctuated<Predicate, Token![,]> =
+                    Punctuated::parse_terminated(&content)?;
+                let preds = preds.into_iter().collect();
+                Ok(if name == "all" {
+                    Predicate::All(preds)
+                } else {
+                    Predicate::Any(preds)
+                })
+            }
+            "not" => {
+                if !has_paren {
+                    return Err(Error::new_spanned(
+                        &ident,
+                        "`not` requires a parenthesized argument",
+                    ));
+                }
+                let content;
+                parenthesized!(content in input);
+                let inner: Predicate = content.parse()?;
+                if !content.is_empty() {
+                    return Err(Error::new(
+                        content.span(),
+                        "`not(...)` takes exactly one argument",
+                    ));
+                }
+                Ok(Predicate::Not(Box::new(inner)))
+            }
+            _ => {
+                if has_paren {
+                    return Err(Error::new_spanned(
+                        &ident,
+                        format!(
+                            "unknown predicate function `{name}`; expected \
+                             `all`, `any`, or `not`"
+                        ),
+                    ));
+                }
+                Ok(Predicate::Tag(ident))
+            }
+        }
+    }
+}
 
 struct Multilayout {
     layouts: Vec<Layout>,
 }
 
-/// Returns `true` if the next item in `input` is a field contribution block — a
-/// bare `{ ... }` or one starting with a `#[variant(...)]` outer attribute.
-/// Pure lookahead: parses the next attribute on a fork to inspect its path,
-/// without advancing `input`. Used to draw the boundary between the
-/// variant-head section and the contribution section without having
-/// `TypeDef::parse` choke on a leading `#[variant(...)]`. If the fork's
-/// attribute parse fails (malformed attribute), we report "not a
-/// contribution" and let the main parser surface the syntax error through
-/// `TypeDef::parse`, which re-parses the same attribute.
+/// Returns `true` if the next item in `input` is a field contribution block —
+/// a bare `{ ... }` or one prefixed by predicate attributes. Pure lookahead:
+/// peels any outer attributes on a fork and reports whether the next
+/// significant token is `{`. If the fork's attribute parse fails (malformed
+/// attribute), we report "not a contribution" and let the main parser surface
+/// the syntax error through `TypeDef::parse`.
 fn looks_like_contribution(input: ParseStream) -> bool {
     if input.peek(token::Brace) {
         return true;
@@ -1177,10 +1377,10 @@ fn looks_like_contribution(input: ParseStream) -> bool {
         return false;
     }
     let fork = input.fork();
-    match fork.call(Attribute::parse_outer) {
-        Ok(attrs) => attrs.iter().any(|a| a.path().is_ident("variant")),
-        Err(_) => false,
+    if fork.call(Attribute::parse_outer).is_err() {
+        return false;
     }
+    fork.peek(token::Brace)
 }
 
 impl Parse for Multilayout {
@@ -1191,13 +1391,13 @@ impl Parse for Multilayout {
             content
         };
 
-        // Phase 1: variant heads.
+        // Phase 1: struct heads.
         let mut types: Vec<TypeDef> = Vec::new();
         while !looks_like_contribution(&input) {
             if input.is_empty() {
                 return Err(Error::new(
                     input.span(),
-                    "expected at least one field contribution block after the variant declarations",
+                    "expected at least one field contribution block after the struct declarations",
                 ));
             }
             types.push(input.parse::<TypeDef>()?);
@@ -1205,12 +1405,18 @@ impl Parse for Multilayout {
         if types.is_empty() {
             return Err(Error::new(
                 input.span(),
-                "expected at least one `struct Variant(base);` declaration",
+                "expected at least one `struct Name(base);` declaration",
             ));
         }
 
-        let known_variants: HashSet<String> =
-            types.iter().map(|t| t.def.ident.to_string()).collect();
+        // The union of all declared tags. Duplicate tag names across
+        // structs are fine.
+        let mut tags: HashSet<String> = HashSet::new();
+        for ty in &types {
+            for t in &ty.tags {
+                tags.insert(t.to_string());
+            }
+        }
 
         // Phase 2: field contribution blocks. Mirrors `layout!`'s requirement
         // of an explicit body block — at least one contribution must be
@@ -1218,67 +1424,58 @@ impl Parse for Multilayout {
         if input.is_empty() {
             return Err(Error::new(
                 input.span(),
-                "expected at least one fieldcontribution block",
+                "expected at least one field contribution block",
             ));
         }
-        let mut tagged: Vec<(Bitfield, Option<Vec<Ident>>)> = Vec::new();
+        let mut contributions: Vec<(Bitfield, Option<Predicate>)> = Vec::new();
 
         while !input.is_empty() {
             let attrs = input.call(Attribute::parse_outer)?;
-            let mut variants: Option<Vec<Ident>> = None;
+            let mut predicate: Option<Predicate> = None;
             for attr in &attrs {
-                if attr.path().is_ident("variant") {
-                    if variants.is_some() {
-                        return Err(Error::new_spanned(
-                            attr,
-                            "duplicate `#[variant(...)]` attribute on a contribution block",
-                        ));
-                    }
-                    let list: Punctuated<Ident, Token![,]> =
-                        attr.parse_args_with(Punctuated::parse_terminated)?;
-                    if list.is_empty() {
-                        return Err(Error::new_spanned(
-                            attr,
-                            "`#[variant(...)]` must name at least one variant; for a contribution that applies to every variant, drop the attribute and use a bare `{ ... }` block",
-                        ));
-                    }
-                    // Validate variant names eagerly so the error points at
-                    // the offending ident rather than at the end of the
-                    // whole macro body.
-                    for v in &list {
-                        if !known_variants.contains(&v.to_string()) {
-                            return Err(Error::new_spanned(
-                                v,
-                                format!("unknown variant `{v}`"),
-                            ));
-                        }
-                    }
-                    variants = Some(list.into_iter().collect());
-                } else {
+                if predicate.is_some() {
                     return Err(Error::new_spanned(
                         attr,
-                        "only `#[variant(...)]` is permitted on a field contribution block",
+                        "only one predicate attribute is permitted per \
+                         contribution block; combine with `all(...)` / \
+                         `any(...)` if you need a compound predicate",
                     ));
                 }
+                let p = Predicate::from_attr(attr)?;
+                // Validate referenced tags eagerly so the error points at
+                // the offending ident rather than at codegen time.
+                let mut refs: Vec<&Ident> = Vec::new();
+                p.collect_tag_refs(&mut refs);
+                for t in refs {
+                    if !tags.contains(&t.to_string()) {
+                        return Err(Error::new_spanned(
+                            t,
+                            format!("unknown tag `{t}`"),
+                        ));
+                    }
+                }
+                predicate = Some(p);
             }
 
             let block;
             braced!(block in input);
             for f in block.parse::<Bitfields>()?.0 {
-                tagged.push((f, variants.clone()));
+                contributions.push((f, predicate.clone()));
             }
         }
 
-        // Fan out: per declared variant, union every contribution that
-        // applies and build its Layout.
+        // Fan out: per declared struct, union every contribution whose
+        // predicate is satisfied by the struct's tag set and build its
+        // Layout.
         let mut layouts: Vec<Layout> = Vec::new();
         for ty in types {
-            let variant_ident = ty.def.ident.clone();
+            let tag_set: HashSet<String> =
+                ty.tags.iter().map(ToString::to_string).collect();
             let mut fields: Vec<Bitfield> = Vec::new();
-            for (field, vs) in &tagged {
-                let belongs = match vs {
+            for (field, pred) in &contributions {
+                let belongs = match pred {
                     None => true,
-                    Some(vs) => vs.iter().any(|v| v == &variant_ident),
+                    Some(p) => p.eval(&tag_set),
                 };
                 if belongs {
                     fields.push(field.clone());
